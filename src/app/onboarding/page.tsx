@@ -21,14 +21,20 @@ export default function OnboardingPage() {
     }
   };
 
-  const handleComplete = () => {
+  const handleComplete = async () => {
     setIsUploading(true);
-    // Mock upload delay
-    setTimeout(() => {
+    try {
+      if (file) {
+        const formData = new FormData();
+        formData.append("file", file);
+        await fetch("/api/parse-cv", { method: "POST", body: formData });
+      }
+    } catch (err) {
+      console.warn("CV upload during onboarding failed, user can re-upload on profile page:", err);
+    } finally {
       setIsUploading(false);
-      alert("Onboarding Complete! Your profile is set up.");
-      // Would redirect to dashboard
-    }, 1500);
+      window.location.href = "/dashboard";
+    }
   };
 
   return (

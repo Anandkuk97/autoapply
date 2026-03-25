@@ -58,34 +58,10 @@ export default function ProfilePage() {
     }
   };
 
-  const extractInfoFromText = (text: string) => {
-    // Basic heuristic extraction
-    const emailMatch = text.match(/([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9_-]+)/);
-    const phoneMatch = text.match(/(\+?\d{1,3}[\s-]?)?\(?\d{3}\)?[\s-]?\d{3}[\s-]?\d{4}/);
-    
-    // Guessing name is likely in the first few lines
-    const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
-    const nameGuess = lines[0] && lines[0].length < 50 ? lines[0] : "";
-
-    setParsedData(prev => ({
-      ...prev,
-      fullName: nameGuess,
-      email: emailMatch ? emailMatch[0] : "",
-      phone: phoneMatch ? phoneMatch[0] : "",
-      rawCvText: text,
-      // Leaving these generic as they require NLP to cleanly extract without a strict format
-      education: text.match(/education/i) ? "Detected Education section..." : "",
-      workExperience: text.match(/experience/i) ? "Detected Experience section..." : "",
-      skills: text.match(/skills/i) ? "Detected Skills section..." : "",
-      certifications: text.match(/certifications?/i) ? "Detected Certifications section..." : ""
-    }));
-  };
-
   const processFile = async (selectedFile: File) => {
     setIsParsing(true);
     setError("");
     try {
-      // 1. Parse PDF Text
       const formData = new FormData();
       formData.append("file", selectedFile);
 
@@ -94,10 +70,23 @@ export default function ProfilePage() {
         body: formData,
       });
 
-      if (!res.ok) throw new Error("Failed to parse PDF");
-      const { text } = await res.json();
-      
-      extractInfoFromText(text);
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        throw new Error(errBody.error || "Failed to parse PDF");
+      }
+      const { text, parsedData: apiParsed } = await res.json();
+
+      setParsedData({
+        fullName: apiParsed?.fullName || "",
+        email: apiParsed?.email || "",
+        phone: apiParsed?.phone || "",
+        location: apiParsed?.location || "",
+        education: apiParsed?.education || "",
+        workExperience: apiParsed?.workExperience || "",
+        skills: apiParsed?.skills || "",
+        certifications: apiParsed?.certifications || "",
+        rawCvText: text || ""
+      });
       setHasParsed(true);
 
       // 2. Upload to Supabase Storage
