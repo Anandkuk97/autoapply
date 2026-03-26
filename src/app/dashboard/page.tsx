@@ -20,6 +20,7 @@ export default function DashboardPage() {
   const [cvCopied, setCvCopied] = useState(false);
   const [clCopied, setClCopied] = useState(false);
   const [error, setError] = useState("");
+  const [userProfile, setUserProfile] = useState<any>(null);
 
   const steps = [
     "Analyzing JD",
@@ -38,14 +39,24 @@ export default function DashboardPage() {
     if (authUser) setUser(authUser);
 
     if (authUser) {
-      const { data, error } = await supabase
-        .from("applications")
-        .select("*")
-        .eq("user_id", authUser.id)
-        .order("applied_date", { ascending: false });
-      
-      if (!error && data) {
-        setApplications(data);
+      const [appsResult, profileResult] = await Promise.all([
+        supabase
+          .from("applications")
+          .select("*")
+          .eq("user_id", authUser.id)
+          .order("applied_date", { ascending: false }),
+        supabase
+          .from("users")
+          .select("name, cv_text, cv_parsed_json")
+          .eq("id", authUser.id)
+          .single()
+      ]);
+
+      if (!appsResult.error && appsResult.data) {
+        setApplications(appsResult.data);
+      }
+      if (!profileResult.error && profileResult.data) {
+        setUserProfile(profileResult.data);
       }
     }
     setLoadingApps(false);
@@ -184,9 +195,26 @@ export default function DashboardPage() {
           </div>
         )}
 
+        {/* CV Status Indicator */}
+        {userProfile?.cv_text ? (
+          <div className="flex items-center justify-between bg-white/5 border border-white/10 rounded-xl px-4 py-3">
+            <div className="flex items-center gap-2 text-sm">
+              <FileText className="w-4 h-4 text-[#81C784]" />
+              <span className="text-gray-300">Your CV: <span className="text-white font-semibold">{userProfile.name || "Uploaded"}</span></span>
+              <CheckCircle2 className="w-3.5 h-3.5 text-[#81C784]" />
+            </div>
+            <a href="/dashboard/profile" className="text-xs text-[var(--color-primary)] hover:underline">Change CV</a>
+          </div>
+        ) : (
+          <div className="flex items-center justify-between bg-red-500/5 border border-red-500/20 rounded-xl px-4 py-3">
+            <span className="text-sm text-red-400">No CV uploaded yet. Upload your CV first to generate applications.</span>
+            <a href="/dashboard/profile" className="text-xs text-[var(--color-primary)] hover:underline font-semibold">Upload CV</a>
+          </div>
+        )}
+
         <div>
           <label className="block text-sm font-medium text-gray-300 mb-2">Paste Job Description</label>
-          <textarea 
+          <textarea
             rows={5}
             value={jobDescription}
             onChange={e => setJobDescription(e.target.value)}

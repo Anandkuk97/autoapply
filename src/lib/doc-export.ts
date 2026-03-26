@@ -1,6 +1,6 @@
 import { saveAs } from 'file-saver';
 import {
-  Document,
+  Document as DocxDocument,
   Packer,
   Paragraph,
   TextRun,
@@ -47,7 +47,7 @@ interface CvBlock {
 function parseCvBlocks(text: string): CvBlock[] {
   const lines = text.split('\n');
   const blocks: CvBlock[] = [];
-  let headerIndex = 0; // track position for name/subtitle/contact detection
+  let headerIndex = 0;
   let currentSection = '';
   let competencyBullets: string[] = [];
 
@@ -62,7 +62,7 @@ function parseCvBlocks(text: string): CvBlock[] {
     const trimmed = lines[i].trim();
 
     if (!trimmed) {
-      if (currentSection === 'CORE COMPETENCIES') continue; // skip blanks inside competencies
+      if (currentSection === 'CORE COMPETENCIES') continue;
       flushCompetencies();
       blocks.push({ type: 'blank', text: '' });
       continue;
@@ -81,7 +81,6 @@ function parseCvBlocks(text: string): CvBlock[] {
       continue;
     }
 
-    // Before first section header: name, subtitle, contact
     if (!currentSection && !blocks.some(b => b.type === 'header')) {
       if (headerIndex === 0 && trimmed === trimmed.toUpperCase() && trimmed.length > 3 && !trimmed.includes('|')) {
         blocks.push({ type: 'name', text: trimmed });
@@ -89,7 +88,6 @@ function parseCvBlocks(text: string): CvBlock[] {
         continue;
       }
       if (headerIndex <= 2 && trimmed.includes('|')) {
-        // Determine if it's subtitle (Role | Specialty) or contact (has @ or phone-like)
         if (trimmed.includes('@') || /\d{5,}/.test(trimmed.replace(/[\s\-+()]/g, ''))) {
           blocks.push({ type: 'contact', text: trimmed });
         } else {
@@ -101,13 +99,11 @@ function parseCvBlocks(text: string): CvBlock[] {
       headerIndex++;
     }
 
-    // CORE COMPETENCIES: collect bullets for 2-column grid
     if (currentSection === 'CORE COMPETENCIES' && trimmed.startsWith('\u2022')) {
       competencyBullets.push(trimmed.replace(/^\u2022\s*/, ''));
       continue;
     }
 
-    // Date line
     const dateMatch = trimmed.match(DATE_RE);
     if (dateMatch) {
       flushCompetencies();
@@ -118,14 +114,12 @@ function parseCvBlocks(text: string): CvBlock[] {
       continue;
     }
 
-    // Bullet
     if (trimmed.startsWith('\u2022')) {
       flushCompetencies();
       blocks.push({ type: 'bullet', text: trimmed });
       continue;
     }
 
-    // Default text
     flushCompetencies();
     blocks.push({ type: 'text', text: trimmed });
   }
@@ -134,115 +128,273 @@ function parseCvBlocks(text: string): CvBlock[] {
   return blocks;
 }
 
+
 // ══════════════════════════════════════════════════════════
-//  CV PDF — Professional layout via html2pdf.js
+//  PDF via jsPDF — full manual layout control
 // ══════════════════════════════════════════════════════════
 
-function buildCvHtml(text: string): string {
+// Page constants (mm)
+const PAGE_W = 210; // A4
+const PAGE_H = 297;
+const MARGIN_TOP = 20;
+const MARGIN_BOTTOM = 20;
+const MARGIN_LEFT = 18;
+const MARGIN_RIGHT = 18;
+const CONTENT_W = PAGE_W - MARGIN_LEFT - MARGIN_RIGHT;
+
+function ensureSpace(doc: any, y: number, needed: number): number {
+  if (y + needed > PAGE_H - MARGIN_BOTTOM) {
+    doc.addPage();
+    return MARGIN_TOP;
+  }
+  return y;
+}
+
+// Word-wrap helper: splits text into lines that fit within maxWidth
+function wrapText(doc: any, text: string, maxWidth: number): string[] {
+  const words = text.split(' ');
+  const lines: string[] = [];
+  let current = '';
+
+  for (const word of words) {
+    const test = current ? `${current} ${word}` : word;
+    if (doc.getTextWidth(test) > maxWidth && current) {
+      lines.push(current);
+      current = word;
+    } else {
+      current = test;
+    }
+  }
+  if (current) lines.push(current);
+  return lines.length ? lines : [''];
+}
+
+function buildCvPdf(doc: any, text: string) {
   const blocks = parseCvBlocks(text);
-  const F = `'Helvetica Neue', Helvetica, Arial, sans-serif`;
-  let html = '';
+  let y = MARGIN_TOP;
 
   for (const b of blocks) {
     switch (b.type) {
-      case 'name':
-        html += `<div style="text-align:center;font-family:${F};font-size:20px;font-weight:700;letter-spacing:3px;color:#111;margin-bottom:2px">${b.text}</div>`;
+      case 'name': {
+        y = ensureSpace(doc, y, 10);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(18);
+        doc.setTextColor(17, 17, 17);
+        const nameW = doc.getTextWidth(b.text);
+        doc.text(b.text, (PAGE_W - nameW) / 2, y);
+        y += 7;
         break;
-      case 'subtitle':
-        html += `<div style="text-align:center;font-family:${F};font-size:11px;color:#444;margin-bottom:1px">${b.text}</div>`;
+      }
+      case 'subtitle': {
+        y = ensureSpace(doc, y, 6);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(11);
+        doc.setTextColor(68, 68, 68);
+        const subW = doc.getTextWidth(b.text);
+        doc.text(b.text, (PAGE_W - subW) / 2, y);
+        y += 5;
         break;
-      case 'contact':
-        html += `<div style="text-align:center;font-family:${F};font-size:10px;color:#555;margin-bottom:8px">${b.text}</div>`;
+      }
+      case 'contact': {
+        y = ensureSpace(doc, y, 6);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(10);
+        doc.setTextColor(85, 85, 85);
+        const conW = doc.getTextWidth(b.text);
+        doc.text(b.text, (PAGE_W - conW) / 2, y);
+        y += 7;
         break;
-      case 'header':
-        html += `<div style="font-family:${F};font-size:11px;font-weight:700;letter-spacing:2px;color:#111;margin-top:14px;padding-bottom:3px;border-bottom:1.5px solid #333">${b.text}</div>`;
+      }
+      case 'header': {
+        y = ensureSpace(doc, y, 12);
+        y += 5; // space above header
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(11);
+        doc.setTextColor(17, 17, 17);
+        doc.text(b.text, MARGIN_LEFT, y);
+        y += 2;
+        doc.setDrawColor(51, 51, 51);
+        doc.setLineWidth(0.4);
+        doc.line(MARGIN_LEFT, y, PAGE_W - MARGIN_RIGHT, y);
+        y += 5;
         break;
+      }
       case 'divider':
-        // We draw the line under the header instead, so skip explicit dividers
+        // Skip — header has border
         break;
-      case 'dateline':
-        html += `<div style="display:flex;justify-content:space-between;align-items:baseline;font-family:${F};margin-top:8px;margin-bottom:1px">`;
-        html += `<span style="font-size:10.5px;font-weight:700;color:#111">${b.left}</span>`;
-        html += `<span style="font-size:10px;color:#555;white-space:nowrap">${b.right}</span>`;
-        html += `</div>`;
+      case 'dateline': {
+        y = ensureSpace(doc, y, 8);
+        y += 3;
+        // Left: bold job title
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(10);
+        doc.setTextColor(17, 17, 17);
+        doc.text(b.left || '', MARGIN_LEFT, y);
+        // Right: date, right-aligned
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9.5);
+        doc.setTextColor(85, 85, 85);
+        const dateW = doc.getTextWidth(b.right || '');
+        doc.text(b.right || '', PAGE_W - MARGIN_RIGHT - dateW, y);
+        y += 4.5;
         break;
-      case 'bullet':
-        html += `<div style="font-family:${F};font-size:10px;color:#222;padding-left:14px;text-indent:-12px;line-height:1.55;margin-top:2px">${b.text}</div>`;
+      }
+      case 'bullet': {
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(10);
+        doc.setTextColor(34, 34, 34);
+        const bulletText = b.text.replace(/^\u2022\s*/, '');
+        const bulletIndent = 4;
+        const bulletMaxW = CONTENT_W - bulletIndent - 3;
+        const bLines = wrapText(doc, bulletText, bulletMaxW);
+        const needed = bLines.length * 4.2 + 1;
+        y = ensureSpace(doc, y, needed);
+        // Draw bullet character
+        doc.text('\u2022', MARGIN_LEFT + bulletIndent, y);
+        // Draw wrapped text
+        for (let li = 0; li < bLines.length; li++) {
+          doc.text(bLines[li], MARGIN_LEFT + bulletIndent + 3, y);
+          y += 4.2;
+        }
+        y += 0.5;
         break;
+      }
       case 'competency-group': {
         const items = b.items || [];
         const half = Math.ceil(items.length / 2);
         const col1 = items.slice(0, half);
         const col2 = items.slice(half);
-        html += `<div style="display:flex;gap:16px;margin-top:6px;margin-bottom:2px">`;
-        html += `<div style="flex:1;font-family:${F};font-size:10px;color:#222;line-height:1.7">${col1.map(c => `<div>\u2022 ${c}</div>`).join('')}</div>`;
-        html += `<div style="flex:1;font-family:${F};font-size:10px;color:#222;line-height:1.7">${col2.map(c => `<div>\u2022 ${c}</div>`).join('')}</div>`;
-        html += `</div>`;
+        const colW = CONTENT_W / 2 - 2;
+        const rowCount = Math.max(col1.length, col2.length);
+        y = ensureSpace(doc, y, rowCount * 4.5 + 3);
+        y += 2;
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(10);
+        doc.setTextColor(34, 34, 34);
+
+        for (let r = 0; r < rowCount; r++) {
+          if (r < col1.length) {
+            doc.text(`\u2022 ${col1[r]}`, MARGIN_LEFT + 2, y);
+          }
+          if (r < col2.length) {
+            doc.text(`\u2022 ${col2[r]}`, MARGIN_LEFT + colW + 4, y);
+          }
+          y += 4.5;
+        }
+        y += 1;
         break;
       }
-      case 'text':
-        html += `<div style="font-family:${F};font-size:10px;color:#222;line-height:1.55;margin-top:2px">${b.text}</div>`;
+      case 'text': {
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(10);
+        doc.setTextColor(34, 34, 34);
+        const tLines = wrapText(doc, b.text, CONTENT_W);
+        const tNeeded = tLines.length * 4.2;
+        y = ensureSpace(doc, y, tNeeded);
+        for (const tl of tLines) {
+          doc.text(tl, MARGIN_LEFT, y);
+          y += 4.2;
+        }
         break;
+      }
       case 'blank':
-        html += `<div style="height:4px"></div>`;
+        y += 2;
         break;
     }
   }
-
-  return `<div style="padding:0;margin:0;color:#111;background:#fff">${html}</div>`;
 }
 
-// ── Cover Letter PDF HTML ──
-function buildCoverLetterHtml(text: string): string {
-  const F = `'Helvetica Neue', Helvetica, Arial, sans-serif`;
+function buildCoverLetterPdf(doc: any, text: string) {
   const lines = text.split('\n');
-  let html = '';
+  let y = MARGIN_TOP;
+  let lineIdx = 0;
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(11);
+  doc.setTextColor(17, 17, 17);
 
   for (const line of lines) {
     const trimmed = line.trim();
+
     if (!trimmed) {
-      html += `<div style="height:12px"></div>`;
+      y += 5;
+      lineIdx++;
       continue;
     }
-    // Detect "Dear ..." or "Warm regards," etc
-    if (/^(Dear|To|Warm regards|Kind regards|Sincerely|Best regards|Yours)/i.test(trimmed)) {
-      html += `<div style="font-family:${F};font-size:11px;color:#111;line-height:1.7;margin-top:4px;margin-bottom:4px">${trimmed}</div>`;
-    } else {
-      html += `<div style="font-family:${F};font-size:11px;color:#222;line-height:1.7;text-align:justify">${trimmed}</div>`;
-    }
-  }
 
-  return `<div style="padding:0;margin:0;color:#111;background:#fff">${html}</div>`;
+    // Name line (ALL CAPS at top)
+    if (lineIdx < 2 && trimmed === trimmed.toUpperCase() && trimmed.length > 3 && !trimmed.includes('|')) {
+      y = ensureSpace(doc, y, 10);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(14);
+      doc.setTextColor(17, 17, 17);
+      doc.text(trimmed, MARGIN_LEFT, y);
+      y += 6;
+      lineIdx++;
+      continue;
+    }
+
+    // Contact line
+    if (lineIdx < 3 && trimmed.includes('|')) {
+      y = ensureSpace(doc, y, 6);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(10);
+      doc.setTextColor(85, 85, 85);
+      doc.text(trimmed, MARGIN_LEFT, y);
+      y += 5;
+      lineIdx++;
+      continue;
+    }
+
+    // Salutation or closing
+    if (/^(Dear|Warm regards|Kind regards|Sincerely|Best regards|Yours)/i.test(trimmed)) {
+      y = ensureSpace(doc, y, 8);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(11);
+      doc.setTextColor(17, 17, 17);
+      doc.text(trimmed, MARGIN_LEFT, y);
+      y += 6;
+      lineIdx++;
+      continue;
+    }
+
+    // Body paragraph text — wrap
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(11);
+    doc.setTextColor(34, 34, 34);
+    const pLines = wrapText(doc, trimmed, CONTENT_W);
+    const needed = pLines.length * 5;
+    y = ensureSpace(doc, y, needed);
+    for (const pl of pLines) {
+      doc.text(pl, MARGIN_LEFT, y);
+      y += 5;
+    }
+    y += 1;
+    lineIdx++;
+  }
 }
 
 export async function downloadAsPdf(text: string, filename: string) {
-  const html2pdf = (await import('html2pdf.js')).default;
+  const { jsPDF } = await import('jspdf');
+  const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
   const isCV = filename.toLowerCase().includes('cv');
 
-  const container = document.createElement('div');
-  container.style.width = '170mm'; // A4 content width at 20mm margins
-  container.innerHTML = isCV ? buildCvHtml(text) : buildCoverLetterHtml(text);
-  document.body.appendChild(container);
+  if (isCV) {
+    buildCvPdf(doc, text);
+  } else {
+    buildCoverLetterPdf(doc, text);
+  }
 
-  await html2pdf()
-    .set({
-      margin: [20, 20, 20, 20],
-      filename: `${filename}.pdf`,
-      html2canvas: { scale: 2, useCORS: true, letterRendering: true },
-      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-    })
-    .from(container)
-    .save();
-
-  document.body.removeChild(container);
+  doc.save(`${filename}.pdf`);
 }
 
+
 // ══════════════════════════════════════════════════════════
-//  CV DOCX — Professional layout via docx lib
+//  DOCX via docx lib — professional layout
 // ══════════════════════════════════════════════════════════
 
 const FONT = 'Calibri';
-const TAB_RIGHT = TabStopPosition.MAX; // right edge
+const TAB_RIGHT = TabStopPosition.MAX;
 
 function buildCvDocxParagraphs(text: string): Paragraph[] {
   const blocks = parseCvBlocks(text);
@@ -257,23 +409,20 @@ function buildCvDocxParagraphs(text: string): Paragraph[] {
           children: [new TextRun({ text: b.text, bold: true, size: 36, font: FONT })],
         }));
         break;
-
       case 'subtitle':
         paras.push(new Paragraph({
           alignment: AlignmentType.CENTER,
           spacing: { after: 20 },
-          children: [new TextRun({ text: b.text, size: 21, font: FONT, color: '444444' })],
+          children: [new TextRun({ text: b.text, size: 22, font: FONT, color: '444444' })],
         }));
         break;
-
       case 'contact':
         paras.push(new Paragraph({
           alignment: AlignmentType.CENTER,
           spacing: { after: 100 },
-          children: [new TextRun({ text: b.text, size: 19, font: FONT, color: '555555' })],
+          children: [new TextRun({ text: b.text, size: 20, font: FONT, color: '555555' })],
         }));
         break;
-
       case 'header':
         paras.push(new Paragraph({
           spacing: { before: 200, after: 60 },
@@ -281,11 +430,8 @@ function buildCvDocxParagraphs(text: string): Paragraph[] {
           children: [new TextRun({ text: b.text, bold: true, size: 22, font: FONT, characterSpacing: 60 })],
         }));
         break;
-
       case 'divider':
-        // Dividers are handled by header bottom border, skip
         break;
-
       case 'dateline':
         paras.push(new Paragraph({
           spacing: { before: 100, after: 20 },
@@ -297,17 +443,16 @@ function buildCvDocxParagraphs(text: string): Paragraph[] {
           ],
         }));
         break;
-
-      case 'bullet':
+      case 'bullet': {
+        const bulletText = b.text;
         paras.push(new Paragraph({
           spacing: { after: 30 },
           indent: { left: 280, hanging: 180 },
-          children: [new TextRun({ text: b.text, size: 20, font: FONT })],
+          children: [new TextRun({ text: bulletText, size: 20, font: FONT })],
         }));
         break;
-
+      }
       case 'competency-group': {
-        // DOCX doesn't do inline columns easily, so use tab-stop two-column approach
         const items = b.items || [];
         const half = Math.ceil(items.length / 2);
         const rows = Math.max(half, items.length - half);
@@ -326,14 +471,12 @@ function buildCvDocxParagraphs(text: string): Paragraph[] {
         }
         break;
       }
-
       case 'text':
         paras.push(new Paragraph({
           spacing: { after: 30 },
           children: [new TextRun({ text: b.text, size: 20, font: FONT })],
         }));
         break;
-
       case 'blank':
         paras.push(new Paragraph({ spacing: { after: 60 } }));
         break;
@@ -347,10 +490,28 @@ function buildCoverLetterDocxParagraphs(text: string): Paragraph[] {
   const lines = text.split('\n');
   const paras: Paragraph[] = [];
 
-  for (const line of lines) {
-    const trimmed = line.trim();
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim();
     if (!trimmed) {
       paras.push(new Paragraph({ spacing: { after: 120 } }));
+      continue;
+    }
+
+    // Name
+    if (i < 2 && trimmed === trimmed.toUpperCase() && trimmed.length > 3 && !trimmed.includes('|')) {
+      paras.push(new Paragraph({
+        spacing: { after: 20 },
+        children: [new TextRun({ text: trimmed, bold: true, size: 28, font: FONT })],
+      }));
+      continue;
+    }
+
+    // Contact
+    if (i < 3 && trimmed.includes('|')) {
+      paras.push(new Paragraph({
+        spacing: { after: 60 },
+        children: [new TextRun({ text: trimmed, size: 20, font: FONT, color: '555555' })],
+      }));
       continue;
     }
 
@@ -367,7 +528,7 @@ export async function downloadAsDocx(text: string, filename: string) {
   const isCV = filename.toLowerCase().includes('cv');
   const children = isCV ? buildCvDocxParagraphs(text) : buildCoverLetterDocxParagraphs(text);
 
-  const doc = new Document({
+  const doc = new DocxDocument({
     sections: [{
       properties: {
         page: {
