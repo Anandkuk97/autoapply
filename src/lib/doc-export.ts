@@ -329,7 +329,7 @@ function renderCvPdf(doc: any, blocks: Block[], sz: Sizing, maxBulletsPerRole: n
         break;
       }
 
-      // ─── SECTION HEADER: bold, with thick dark line below ───
+      // ─── SECTION HEADER: bold, with thin elegant line below ───
       case 'header': {
         // Gap before header
         if (prevType && prevType !== 'contact' && prevType !== 'divider') {
@@ -340,11 +340,11 @@ function renderCvPdf(doc: any, blocks: Block[], sz: Sizing, maxBulletsPerRole: n
         doc.setTextColor(0, 0, 0);
         doc.text(b.text, ML, y);
         y += 1.8;
-        // Thick dark line below header (matching reference)
-        doc.setDrawColor(0, 0, 0);
-        doc.setLineWidth(0.5);
+        // Thin elegant line below header
+        doc.setDrawColor(204, 204, 204);
+        doc.setLineWidth(0.2);
         doc.line(ML, y, PG_W - MR, y);
-        y += sz.afterHeaderLine;
+        y += 2.5; // 2.5mm gap between line and content
         bulletsInRole = 0;
         break;
       }
@@ -472,26 +472,80 @@ function renderCvPdf(doc: any, blocks: Block[], sz: Sizing, maxBulletsPerRole: n
   return y;
 }
 
+// Create a sizing variant with scaled body/bullet fonts and proportional line heights
+function scaleSizing(base: Sizing, bodyFontPt: number): Sizing {
+  const ratio = bodyFontPt / base.bodyFont;
+  return {
+    ...base,
+    bodyFont: bodyFontPt,
+    bulletFont: base.bulletFont * ratio,
+    compFont: base.compFont * ratio,
+    certFont: base.certFont * ratio,
+    companyFont: base.companyFont * ratio,
+    summaryLH: base.summaryLH * ratio,
+    bulletLH: base.bulletLH * ratio,
+    compLH: base.compLH * ratio,
+    certLH: base.certLH * ratio,
+    betweenBullets: base.betweenBullets * ratio,
+    betweenRoles: base.betweenRoles * ratio,
+    beforeHeader: base.beforeHeader * ratio,
+    // Keep afterHeaderLine fixed at 2.5mm (the gap we set)
+    afterHeaderLine: 2.5,
+  };
+}
+
 // Dry-run measurement on a throwaway doc
 function measureCv(jsPDFClass: any, blocks: Block[], sz: Sizing, maxB: number): number {
   const tmp = new jsPDFClass({ unit: 'mm', format: 'a4', orientation: 'portrait' });
   return renderCvPdf(tmp, blocks, sz, maxB);
 }
 
+// Target: fill page with 15-20mm bottom margin (MAX_Y = 282, so content should end between 262-277)
+const IDEAL_MIN_Y = MAX_Y - 20; // 262mm — if content ends before this, scale up
+const IDEAL_MAX_Y = MAX_Y;      // 282mm — must not exceed this
+
 function buildCvPdf(doc: any, text: string, jsPDFClass: any) {
   const blocks = parseBlocks(text);
 
-  // Try normal → compact → compact+4bullets
-  let finalY = measureCv(jsPDFClass, blocks, NORMAL, 6);
-  if (finalY <= MAX_Y) { renderCvPdf(doc, blocks, NORMAL, 6); return; }
+  // Step 1: Try increasing font sizes to fill the page (9.5 → 10 → 10.5 → 11)
+  const upSizes = [9.5, 10, 10.5, 11];
+  let bestSz: Sizing = NORMAL;
+  let bestBullets = 6;
+  let bestY = 0;
 
-  finalY = measureCv(jsPDFClass, blocks, NORMAL, 5);
-  if (finalY <= MAX_Y) { renderCvPdf(doc, blocks, NORMAL, 5); return; }
+  for (const fs of upSizes) {
+    const sz = scaleSizing(NORMAL, fs);
+    const y = measureCv(jsPDFClass, blocks, sz, 6);
+    if (y <= IDEAL_MAX_Y) {
+      bestSz = sz;
+      bestBullets = 6;
+      bestY = y;
+    } else {
+      break; // overflows, stop scaling up
+    }
+  }
 
-  finalY = measureCv(jsPDFClass, blocks, COMPACT, 5);
-  if (finalY <= MAX_Y) { renderCvPdf(doc, blocks, COMPACT, 5); return; }
+  // If best fit has too much space AND we haven't maxed fonts, we already picked the largest that fits
+  // If the normal 9.5pt already overflows, scale down
+  if (bestY === 0) {
+    // Even 9.5pt overflows with 6 bullets — try reducing bullets
+    const sz95 = scaleSizing(NORMAL, 9.5);
+    let y = measureCv(jsPDFClass, blocks, sz95, 5);
+    if (y <= IDEAL_MAX_Y) {
+      bestSz = sz95; bestBullets = 5; bestY = y;
+    } else {
+      // Try compact
+      y = measureCv(jsPDFClass, blocks, COMPACT, 5);
+      if (y <= IDEAL_MAX_Y) {
+        bestSz = COMPACT; bestBullets = 5; bestY = y;
+      } else {
+        bestSz = COMPACT; bestBullets = 4; bestY = measureCv(jsPDFClass, blocks, COMPACT, 4);
+      }
+    }
+  }
 
-  renderCvPdf(doc, blocks, COMPACT, 4);
+  // Render with the best sizing
+  renderCvPdf(doc, blocks, bestSz, bestBullets);
 }
 
 
