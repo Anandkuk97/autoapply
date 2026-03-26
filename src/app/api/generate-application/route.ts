@@ -77,7 +77,11 @@ EXACT FORMAT RULES:
 - ALL section headers MUST be in ALL CAPS (e.g. PROFESSIONAL SUMMARY, CORE COMPETENCIES, etc.)
 - Add a line of dashes "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" between EVERY section as a divider
 - PROFESSIONAL SUMMARY: 2-3 concise sentences, no bullets
-- CORE COMPETENCIES: exactly 12 items using • character, arranged as a single list (will be displayed in 3 columns of 4)
+- CORE COMPETENCIES: exactly 12 items, each on its OWN LINE starting with • character. One item per line. Example:
+• Supply Chain Management
+• Logistics & Distribution
+• Procurement & Sourcing
+(etc. - 12 items total, one per line, NEVER put multiple items on one line)
 - PROFESSIONAL EXPERIENCE: Maximum 5 bullet points per role. Each bullet must start with a strong action verb and include a measurable impact where possible. Job title on one line with dates on the SAME line pushed to the far right, format "Mon YYYY - Mon YYYY". Company and location on the next line.
 - KEY ACHIEVEMENTS: Maximum 4 quantified results using • bullets
 - SELECTED PROJECT: Project name on one line with dates on the SAME line pushed to the far right (SAME format as work experience: "Mon YYYY - Mon YYYY" or "Mon YYYY"). Maximum 2 bullets.

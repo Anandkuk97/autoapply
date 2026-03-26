@@ -497,6 +497,8 @@ const CV_HEADERS = [
 ];
 const DIVIDER_RE = /^[━─\-=]{5,}$/;
 const DATE_RE = /(\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{4}\s*-\s*(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{4}\b|\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{4}\s*-\s*Present\b)/i;
+const YEAR_RANGE_RE_DASH = /(\b\d{4}\s*-\s*\d{4})\s*$/;
+const SINGLE_DATE_RE_DASH = /(\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{4})\s*$/i;
 
 function FormattedCV({ text }: { text: string }) {
   const lines = text.split('\n');
@@ -580,10 +582,20 @@ function FormattedCV({ text }: { text: string }) {
       headerIdx++;
     }
 
-    // CORE COMPETENCIES: collect bullets for 2-column
-    if (currentSection === 'CORE COMPETENCIES' && trimmed.startsWith('\u2022')) {
-      competencyBullets.push(trimmed.replace(/^\u2022\s*/, ''));
-      continue;
+    // CORE COMPETENCIES: collect bullets (handles single or multi-bullet lines)
+    if (currentSection === 'CORE COMPETENCIES') {
+      if (trimmed.includes('\u2022')) {
+        const parts = trimmed.split('\u2022').map((s: string) => s.trim()).filter((s: string) => s.length > 0);
+        for (const part of parts) competencyBullets.push(part);
+        continue;
+      }
+      if (!CV_HEADERS.some(h => trimmed === h) && trimmed.length > 2) {
+        const commaParts = trimmed.split(',').map((s: string) => s.trim()).filter((s: string) => s.length > 0);
+        if (commaParts.length > 1) {
+          for (const cp of commaParts) competencyBullets.push(cp);
+          continue;
+        }
+      }
     }
 
     // Date line — left text / right-aligned date
@@ -600,6 +612,27 @@ function FormattedCV({ text }: { text: string }) {
         </div>
       );
       continue;
+    }
+
+    // Year range dates (e.g. "2021 - 2024") or single dates (e.g. "Sep 2026")
+    if (!trimmed.startsWith('\u2022')) {
+      const yrMatch = trimmed.match(YEAR_RANGE_RE_DASH);
+      const sdMatch = !yrMatch ? trimmed.match(SINGLE_DATE_RE_DASH) : null;
+      const anyDateEnd = yrMatch || sdMatch;
+      if (anyDateEnd) {
+        const matched = yrMatch ? yrMatch[1] : sdMatch![1];
+        const leftPart = trimmed.slice(0, trimmed.indexOf(matched)).trim();
+        if (leftPart.length > 3) {
+          flushCompetencies();
+          elements.push(
+            <div key={key} className="flex justify-between items-baseline gap-4 mt-2 mb-0.5">
+              <span className="font-bold text-[11px] text-gray-900">{leftPart}</span>
+              <span className="text-gray-500 whitespace-nowrap text-[10px] shrink-0">{matched}</span>
+            </div>
+          );
+          continue;
+        }
+      }
     }
 
     // Bullet

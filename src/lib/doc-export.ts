@@ -97,9 +97,26 @@ function parseBlocks(text: string): Block[] {
     }
 
     // Core competencies bullets → collect
-    if (section === 'CORE COMPETENCIES' && t.startsWith('\u2022')) {
-      compBullets.push(t.replace(/^\u2022\s*/, ''));
-      continue;
+    // Handle both formats:
+    // 1. One bullet per line: "• Supply Chain Management"
+    // 2. All on one line: "• Supply Chain • Logistics • Procurement"
+    if (section === 'CORE COMPETENCIES') {
+      if (t.includes('\u2022')) {
+        // Split by bullet character, filter empties, collect each
+        const parts = t.split('\u2022').map(s => s.trim()).filter(s => s.length > 0);
+        for (const part of parts) {
+          compBullets.push(part);
+        }
+        continue;
+      }
+      // Also handle lines without bullet that are just text items (comma-separated)
+      if (!SECTION_HEADERS.some(h => t === h) && t.length > 2) {
+        const commaParts = t.split(',').map(s => s.trim()).filter(s => s.length > 0);
+        if (commaParts.length > 1) {
+          for (const cp of commaParts) compBullets.push(cp);
+          continue;
+        }
+      }
     }
 
     // Certifications lines with "Prefix: value"
