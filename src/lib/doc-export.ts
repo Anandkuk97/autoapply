@@ -158,7 +158,7 @@ const PG_W = 210;
 const PG_H = 297;
 const ML = 18;   // left margin
 const MR = 18;   // right margin
-const MT = 20;   // top margin
+const MT = 15;   // top margin (reduced from 20 for more content space)
 const MB = 20;   // bottom margin
 const CW = PG_W - ML - MR; // content width
 const MAX_Y = PG_H - MB;   // 277mm
@@ -260,12 +260,7 @@ function renderCvPdf(doc: any, blocks: Block[], sz: Sizing, maxBulletsPerRole: n
         doc.setFontSize(9);
         doc.setTextColor(85, 85, 85);
         doc.text(b.text, PG_W / 2, y, { align: 'center' });
-        y += 3 + 5; // 9pt descent + 5mm gap
-        // Thin divider line after contact block
-        doc.setDrawColor(204, 204, 204);
-        doc.setLineWidth(0.1);
-        doc.line(ML, y, PG_W - MR, y);
-        y += 5; // 5mm gap after line
+        y += 3 + 3; // 9pt descent + 3mm gap to first section header
         break;
       }
 
@@ -295,14 +290,15 @@ function renderCvPdf(doc: any, blocks: Block[], sz: Sizing, maxBulletsPerRole: n
       case 'dateline': {
         if (prevType === 'bullet' || prevType === 'text') {
           y += sz.betweenRoles;
-          bulletsInCurrentRole = 0;
         }
+        // Always reset bullet counter for each new dateline (new role/entry)
+        bulletsInCurrentRole = 0;
         // Title — bold left
         doc.setFont('helvetica', 'bold');
         doc.setFontSize(10);
         doc.setTextColor(0, 0, 0);
         doc.text(b.left || '', ML, y);
-        // Date — normal right-aligned
+        // Date — normal right-aligned (pushed to far right edge)
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(9.5);
         doc.setTextColor(0, 0, 0);
@@ -314,7 +310,11 @@ function renderCvPdf(doc: any, blocks: Block[], sz: Sizing, maxBulletsPerRole: n
       // ─── BULLET ───
       case 'bullet': {
         bulletsInCurrentRole++;
-        if (bulletsInCurrentRole > maxBulletsPerRole) break; // skip excess bullets
+        if (bulletsInCurrentRole > maxBulletsPerRole) {
+          console.log(`[PDF] Skipping bullet #${bulletsInCurrentRole} (max ${maxBulletsPerRole}):`, b.text.slice(0, 50));
+          break;
+        }
+        console.log(`[PDF] Rendering bullet #${bulletsInCurrentRole}:`, b.text.slice(0, 60));
 
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(sz.bulletFont);
@@ -409,36 +409,42 @@ function renderCvPdf(doc: any, blocks: Block[], sz: Sizing, maxBulletsPerRole: n
   return y;
 }
 
-function buildCvPdf(doc: any, text: string) {
+// Dry-run: measure final Y without actually drawing
+function measureCvPdf(jsPDFClass: any, blocks: Block[], sz: Sizing, maxBullets: number): number {
+  // Create a throwaway doc just for text width measurements
+  const tmp = new jsPDFClass({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+  return renderCvPdf(tmp, blocks, sz, maxBullets);
+}
+
+// Exported for use — receives the jsPDF constructor
+function buildCvPdf(doc: any, text: string, jsPDFClass: any) {
   const blocks = parseBlocks(text);
+  console.log(`[PDF] Total blocks parsed: ${blocks.length}`);
+  console.log(`[PDF] Block types:`, blocks.map(b => b.type).join(', '));
 
-  // First pass: try normal sizing
-  let finalY = renderCvPdf(doc, blocks, NORMAL, 5);
+  // Measure with normal sizing
+  let finalY = measureCvPdf(jsPDFClass, blocks, NORMAL, 5);
+  console.log(`[PDF] Normal sizing final Y: ${finalY.toFixed(1)}mm (max: ${MAX_Y}mm)`);
 
-  if (finalY > MAX_Y) {
-    // Overflow — clear and retry with compact sizing
-    // jsPDF doesn't support clearing, so we delete all pages and start fresh
-    const totalPages = doc.getNumberOfPages();
-    // Remove extra pages if any were added
-    while (doc.getNumberOfPages() > 1) {
-      doc.deletePage(doc.getNumberOfPages());
-    }
-    // Clear the single remaining page by adding a white rectangle
-    doc.setFillColor(255, 255, 255);
-    doc.rect(0, 0, PG_W, PG_H, 'F');
-
-    finalY = renderCvPdf(doc, blocks, COMPACT, 5);
-
-    if (finalY > MAX_Y) {
-      // Still overflows — retry compact with max 4 bullets
-      while (doc.getNumberOfPages() > 1) {
-        doc.deletePage(doc.getNumberOfPages());
-      }
-      doc.setFillColor(255, 255, 255);
-      doc.rect(0, 0, PG_W, PG_H, 'F');
-      renderCvPdf(doc, blocks, COMPACT, 4);
-    }
+  if (finalY <= MAX_Y) {
+    // Fits — render once on the real doc
+    renderCvPdf(doc, blocks, NORMAL, 5);
+    return;
   }
+
+  // Try compact sizing
+  finalY = measureCvPdf(jsPDFClass, blocks, COMPACT, 5);
+  console.log(`[PDF] Compact sizing final Y: ${finalY.toFixed(1)}mm`);
+
+  if (finalY <= MAX_Y) {
+    renderCvPdf(doc, blocks, COMPACT, 5);
+    return;
+  }
+
+  // Try compact with max 4 bullets
+  finalY = measureCvPdf(jsPDFClass, blocks, COMPACT, 4);
+  console.log(`[PDF] Compact+4bullets final Y: ${finalY.toFixed(1)}mm`);
+  renderCvPdf(doc, blocks, COMPACT, 4);
 }
 
 
@@ -527,7 +533,7 @@ export async function downloadAsPdf(text: string, filename: string) {
   const isCV = filename.toLowerCase().includes('cv');
 
   if (isCV) {
-    buildCvPdf(doc, text);
+    buildCvPdf(doc, text, jsPDF);
   } else {
     buildCoverLetterPdf(doc, text);
   }
