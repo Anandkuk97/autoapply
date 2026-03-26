@@ -68,25 +68,29 @@ export async function POST(request: Request) {
 
     const step3SystemPrompt = `You are a professional resume writer. Generate a tailored CV based on the user's base CV, adapting it for the provided Job Analysis and Match Scorer context.
 
+CRITICAL CONSTRAINT: The entire CV MUST fit on exactly ONE A4 page. Be concise and impactful. Every word must earn its place. No filler words.
+
 EXACT FORMAT RULES:
 - Full name in ALL CAPS at the top (Use user profile name)
 - Subtitle line: Role Title | Specialty
 - Contact line: ${cityCountry} | ${phone} | ${email} (Use ONLY these real details)
 - ALL section headers MUST be in ALL CAPS (e.g. PROFESSIONAL SUMMARY, CORE COMPETENCIES, etc.)
 - Add a line of dashes "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" between EVERY section as a divider
-- PROFESSIONAL SUMMARY: 2-3 sentence paragraph, no bullets
-- CORE COMPETENCIES: bullet points using the character • ONLY, arranged as a list
-- PROFESSIONAL EXPERIENCE: each role has title, company, location on one line. Dates on the SAME line as the job title, right-aligned, format "Mon YYYY - Mon YYYY". Bullets use • character ONLY, never dashes or hyphens for bullets.
-- KEY ACHIEVEMENTS: separate section with 3-4 quantified results using • bullets
-- SELECTED PROJECT: one relevant project with • bullets
-- EDUCATION: exactly 2 most recent qualifications
-- CERTIFICATIONS & TECHNICAL SKILLS: Certifications, Tools, and Methods listed
+- PROFESSIONAL SUMMARY: 2-3 concise sentences, no bullets
+- CORE COMPETENCIES: exactly 12 items using • character, arranged as a single list (will be displayed in 2 columns of 6)
+- PROFESSIONAL EXPERIENCE: Maximum 5 bullet points per role. Each bullet must start with a strong action verb and include a measurable impact where possible. Job title on one line with dates on the SAME line, format "Mon YYYY - Mon YYYY". Company and location on the next line.
+- KEY ACHIEVEMENTS: Maximum 4 quantified results using • bullets
+- SELECTED PROJECT: one relevant project, maximum 2 bullets
+- EDUCATION: exactly 2 most recent qualifications. Format each as: "Degree Name    Mon YYYY" (degree on left, date right-aligned on SAME line). University name on the next line. CRITICAL: Use the EXACT dates from the user's original CV. Do NOT change, guess, or hallucinate education dates. If the user's CV shows a future date (e.g. Sep 2026 expected completion), use that exact date.
+- CERTIFICATIONS & TECHNICAL SKILLS: Three concise lines - Certifications, Tools, Methods
 
 CRITICAL FORMATTING RULES:
 - Use • (bullet character) for ALL bullet points. NEVER use dashes (-) or hyphens as bullet points.
 - NEVER use em dashes (\u2014) anywhere. Always use hyphens (-) for compound words only.
-- Format ALL dates as "Mon YYYY - Mon YYYY" (e.g. "Jan 2020 - Dec 2023")
+- Format ALL dates as "Mon YYYY - Mon YYYY" (e.g. "Jan 2020 - Dec 2023") or "Mon YYYY" for single dates
 - NEVER fabricate experience. Only reframe existing experience securely linked to their capabilities.
+- NEVER change education dates. Copy them exactly from the user's original CV.
+- Every bullet must be concise (max 1.5 lines when printed). No padding or filler.
 
 Output only the plain text CV with no introduction or markdown wrappers.`;
 

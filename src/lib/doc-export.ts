@@ -25,7 +25,10 @@ const CV_SECTION_HEADERS = [
 ];
 
 const DIVIDER_RE = /^[━─\-=]{5,}$/;
+// Matches date ranges like "Jan 2020 - Dec 2023" or "Jan 2020 - Present"
 const DATE_RE = /(\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{4}\s*-\s*(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{4}\b|\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{4}\s*-\s*Present\b)/i;
+// Matches standalone single dates like "Sep 2026" at end of line (for education)
+const SINGLE_DATE_RE = /(\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{4})\s*$/i;
 
 function isSectionHeader(line: string): boolean {
   const t = line.trim();
@@ -81,6 +84,7 @@ function parseCvBlocks(text: string): CvBlock[] {
       continue;
     }
 
+    // Before first section header: name/subtitle/contact
     if (!currentSection && !blocks.some(b => b.type === 'header')) {
       if (headerIndex === 0 && trimmed === trimmed.toUpperCase() && trimmed.length > 3 && !trimmed.includes('|')) {
         blocks.push({ type: 'name', text: trimmed });
@@ -99,11 +103,13 @@ function parseCvBlocks(text: string): CvBlock[] {
       headerIndex++;
     }
 
+    // CORE COMPETENCIES: collect bullets for 2-column
     if (currentSection === 'CORE COMPETENCIES' && trimmed.startsWith('\u2022')) {
       competencyBullets.push(trimmed.replace(/^\u2022\s*/, ''));
       continue;
     }
 
+    // Date range line (experience, project)
     const dateMatch = trimmed.match(DATE_RE);
     if (dateMatch) {
       flushCompetencies();
@@ -114,6 +120,20 @@ function parseCvBlocks(text: string): CvBlock[] {
       continue;
     }
 
+    // Single date line (education) - e.g. "MBA - Operations Sep 2026"
+    if (currentSection === 'EDUCATION' || currentSection.startsWith('EDUCATION')) {
+      const singleMatch = trimmed.match(SINGLE_DATE_RE);
+      if (singleMatch && !trimmed.startsWith('\u2022')) {
+        const left = trimmed.slice(0, trimmed.indexOf(singleMatch[1])).trim();
+        const right = singleMatch[1].trim();
+        if (left.length > 3) {
+          blocks.push({ type: 'dateline', text: trimmed, left, right });
+          continue;
+        }
+      }
+    }
+
+    // Bullet
     if (trimmed.startsWith('\u2022')) {
       flushCompetencies();
       blocks.push({ type: 'bullet', text: trimmed });
@@ -130,11 +150,10 @@ function parseCvBlocks(text: string): CvBlock[] {
 
 
 // ══════════════════════════════════════════════════════════
-//  PDF via jsPDF — full manual layout control
+//  PDF via jsPDF — tight one-page layout
 // ══════════════════════════════════════════════════════════
 
-// Page constants (mm)
-const PAGE_W = 210; // A4
+const PAGE_W = 210; // A4 mm
 const PAGE_H = 297;
 const MARGIN_TOP = 20;
 const MARGIN_BOTTOM = 20;
@@ -142,20 +161,24 @@ const MARGIN_LEFT = 18;
 const MARGIN_RIGHT = 18;
 const CONTENT_W = PAGE_W - MARGIN_LEFT - MARGIN_RIGHT;
 
-function ensureSpace(doc: any, y: number, needed: number): number {
-  if (y + needed > PAGE_H - MARGIN_BOTTOM) {
-    doc.addPage();
-    return MARGIN_TOP;
-  }
-  return y;
-}
+// Spacing constants (mm) — tight for one-page fit
+const SP = {
+  afterName: 1.5,        // gap after name
+  afterSubtitle: 1,      // gap after subtitle line
+  afterContact: 3,       // gap after contact block to first section (~8pt)
+  beforeHeader: 3.5,     // gap before section header (~10pt from last bullet)
+  afterHeaderLine: 1.5,  // gap after header underline (~4pt)
+  betweenBullets: 0.7,   // gap between bullet lines (~2pt)
+  afterBulletBlock: 0,   // no extra gap after bullets (beforeHeader handles it)
+  betweenRoles: 2.8,     // gap between experience roles (~8pt)
+  lineHeight: 3.7,       // body text line height (~1.3 at 10pt)
+  bulletLineHeight: 3.6, // bullet text line height
+};
 
-// Word-wrap helper: splits text into lines that fit within maxWidth
 function wrapText(doc: any, text: string, maxWidth: number): string[] {
   const words = text.split(' ');
   const lines: string[] = [];
   let current = '';
-
   for (const word of words) {
     const test = current ? `${current} ${word}` : word;
     if (doc.getTextWidth(test) > maxWidth && current) {
@@ -172,91 +195,98 @@ function wrapText(doc: any, text: string, maxWidth: number): string[] {
 function buildCvPdf(doc: any, text: string) {
   const blocks = parseCvBlocks(text);
   let y = MARGIN_TOP;
+  let prevType = '';
 
-  for (const b of blocks) {
+  for (let bi = 0; bi < blocks.length; bi++) {
+    const b = blocks[bi];
+
     switch (b.type) {
       case 'name': {
-        y = ensureSpace(doc, y, 10);
         doc.setFont('helvetica', 'bold');
         doc.setFontSize(18);
         doc.setTextColor(17, 17, 17);
         const nameW = doc.getTextWidth(b.text);
         doc.text(b.text, (PAGE_W - nameW) / 2, y);
-        y += 7;
+        y += 6 + SP.afterName;
         break;
       }
       case 'subtitle': {
-        y = ensureSpace(doc, y, 6);
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(11);
         doc.setTextColor(68, 68, 68);
         const subW = doc.getTextWidth(b.text);
         doc.text(b.text, (PAGE_W - subW) / 2, y);
-        y += 5;
+        y += 4 + SP.afterSubtitle;
         break;
       }
       case 'contact': {
-        y = ensureSpace(doc, y, 6);
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(10);
-        doc.setTextColor(85, 85, 85);
-        const conW = doc.getTextWidth(b.text);
-        doc.text(b.text, (PAGE_W - conW) / 2, y);
-        y += 7;
-        break;
-      }
-      case 'header': {
-        y = ensureSpace(doc, y, 12);
-        y += 5; // space above header
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(11);
-        doc.setTextColor(17, 17, 17);
-        doc.text(b.text, MARGIN_LEFT, y);
-        y += 2;
-        doc.setDrawColor(51, 51, 51);
-        doc.setLineWidth(0.4);
-        doc.line(MARGIN_LEFT, y, PAGE_W - MARGIN_RIGHT, y);
-        y += 5;
-        break;
-      }
-      case 'divider':
-        // Skip — header has border
-        break;
-      case 'dateline': {
-        y = ensureSpace(doc, y, 8);
-        y += 3;
-        // Left: bold job title
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(10);
-        doc.setTextColor(17, 17, 17);
-        doc.text(b.left || '', MARGIN_LEFT, y);
-        // Right: date, right-aligned
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(9.5);
         doc.setTextColor(85, 85, 85);
+        const conW = doc.getTextWidth(b.text);
+        doc.text(b.text, (PAGE_W - conW) / 2, y);
+        y += 3.5 + SP.afterContact;
+        break;
+      }
+      case 'header': {
+        // Space before header (unless it's the very first element after contact)
+        if (prevType && prevType !== 'contact' && prevType !== 'blank') {
+          y += SP.beforeHeader;
+        } else if (prevType === 'blank') {
+          // blank already added small gap, just add a tiny bit more
+          y += 1;
+        }
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(10.5);
+        doc.setTextColor(17, 17, 17);
+        doc.text(b.text, MARGIN_LEFT, y);
+        y += 1.5;
+        doc.setDrawColor(60, 60, 60);
+        doc.setLineWidth(0.3);
+        doc.line(MARGIN_LEFT, y, PAGE_W - MARGIN_RIGHT, y);
+        y += SP.afterHeaderLine;
+        break;
+      }
+      case 'divider':
+        // Skip — header has underline
+        break;
+      case 'dateline': {
+        // Add role gap if previous was bullet (new role within same section)
+        if (prevType === 'bullet') {
+          y += SP.betweenRoles;
+        } else {
+          y += 1;
+        }
+        // Left: bold title
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9.5);
+        doc.setTextColor(17, 17, 17);
+        doc.text(b.left || '', MARGIN_LEFT, y);
+        // Right: date
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9);
+        doc.setTextColor(100, 100, 100);
         const dateW = doc.getTextWidth(b.right || '');
         doc.text(b.right || '', PAGE_W - MARGIN_RIGHT - dateW, y);
-        y += 4.5;
+        y += 3.8;
         break;
       }
       case 'bullet': {
         doc.setFont('helvetica', 'normal');
-        doc.setFontSize(10);
+        doc.setFontSize(9.5);
         doc.setTextColor(34, 34, 34);
         const bulletText = b.text.replace(/^\u2022\s*/, '');
-        const bulletIndent = 4;
-        const bulletMaxW = CONTENT_W - bulletIndent - 3;
+        const indent = 4;
+        const bulletMaxW = CONTENT_W - indent - 3;
         const bLines = wrapText(doc, bulletText, bulletMaxW);
-        const needed = bLines.length * 4.2 + 1;
-        y = ensureSpace(doc, y, needed);
-        // Draw bullet character
-        doc.text('\u2022', MARGIN_LEFT + bulletIndent, y);
-        // Draw wrapped text
+
+        // Bullet character
+        doc.text('\u2022', MARGIN_LEFT + indent, y);
         for (let li = 0; li < bLines.length; li++) {
-          doc.text(bLines[li], MARGIN_LEFT + bulletIndent + 3, y);
-          y += 4.2;
+          doc.text(bLines[li], MARGIN_LEFT + indent + 3, y);
+          y += SP.bulletLineHeight;
         }
-        y += 0.5;
+        y += SP.betweenBullets;
         break;
       }
       case 'competency-group': {
@@ -265,13 +295,12 @@ function buildCvPdf(doc: any, text: string) {
         const col1 = items.slice(0, half);
         const col2 = items.slice(half);
         const colW = CONTENT_W / 2 - 2;
-        const rowCount = Math.max(col1.length, col2.length);
-        y = ensureSpace(doc, y, rowCount * 4.5 + 3);
-        y += 2;
+        y += 1;
         doc.setFont('helvetica', 'normal');
-        doc.setFontSize(10);
+        doc.setFontSize(9.5);
         doc.setTextColor(34, 34, 34);
 
+        const rowCount = Math.max(col1.length, col2.length);
         for (let r = 0; r < rowCount; r++) {
           if (r < col1.length) {
             doc.text(`\u2022 ${col1[r]}`, MARGIN_LEFT + 2, y);
@@ -279,29 +308,32 @@ function buildCvPdf(doc: any, text: string) {
           if (r < col2.length) {
             doc.text(`\u2022 ${col2[r]}`, MARGIN_LEFT + colW + 4, y);
           }
-          y += 4.5;
+          y += 3.8;
         }
-        y += 1;
         break;
       }
       case 'text': {
         doc.setFont('helvetica', 'normal');
-        doc.setFontSize(10);
+        doc.setFontSize(9.5);
         doc.setTextColor(34, 34, 34);
         const tLines = wrapText(doc, b.text, CONTENT_W);
-        const tNeeded = tLines.length * 4.2;
-        y = ensureSpace(doc, y, tNeeded);
         for (const tl of tLines) {
           doc.text(tl, MARGIN_LEFT, y);
-          y += 4.2;
+          y += SP.lineHeight;
         }
         break;
       }
       case 'blank':
-        y += 2;
+        y += 1;
         break;
     }
+
+    if (b.type !== 'divider') {
+      prevType = b.type;
+    }
   }
+
+  return y; // return final y for overflow detection
 }
 
 function buildCoverLetterPdf(doc: any, text: string) {
@@ -309,22 +341,17 @@ function buildCoverLetterPdf(doc: any, text: string) {
   let y = MARGIN_TOP;
   let lineIdx = 0;
 
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(11);
-  doc.setTextColor(17, 17, 17);
-
   for (const line of lines) {
     const trimmed = line.trim();
 
     if (!trimmed) {
-      y += 5;
+      y += 4;
       lineIdx++;
       continue;
     }
 
-    // Name line (ALL CAPS at top)
+    // Name (ALL CAPS at top)
     if (lineIdx < 2 && trimmed === trimmed.toUpperCase() && trimmed.length > 3 && !trimmed.includes('|')) {
-      y = ensureSpace(doc, y, 10);
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(14);
       doc.setTextColor(17, 17, 17);
@@ -336,19 +363,17 @@ function buildCoverLetterPdf(doc: any, text: string) {
 
     // Contact line
     if (lineIdx < 3 && trimmed.includes('|')) {
-      y = ensureSpace(doc, y, 6);
       doc.setFont('helvetica', 'normal');
-      doc.setFontSize(10);
+      doc.setFontSize(9.5);
       doc.setTextColor(85, 85, 85);
       doc.text(trimmed, MARGIN_LEFT, y);
-      y += 5;
+      y += 4.5;
       lineIdx++;
       continue;
     }
 
     // Salutation or closing
     if (/^(Dear|Warm regards|Kind regards|Sincerely|Best regards|Yours)/i.test(trimmed)) {
-      y = ensureSpace(doc, y, 8);
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(11);
       doc.setTextColor(17, 17, 17);
@@ -358,16 +383,18 @@ function buildCoverLetterPdf(doc: any, text: string) {
       continue;
     }
 
-    // Body paragraph text — wrap
+    // Body text — wrap
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(11);
     doc.setTextColor(34, 34, 34);
     const pLines = wrapText(doc, trimmed, CONTENT_W);
-    const needed = pLines.length * 5;
-    y = ensureSpace(doc, y, needed);
     for (const pl of pLines) {
+      if (y > PAGE_H - MARGIN_BOTTOM) {
+        doc.addPage();
+        y = MARGIN_TOP;
+      }
       doc.text(pl, MARGIN_LEFT, y);
-      y += 5;
+      y += 4.8;
     }
     y += 1;
     lineIdx++;
@@ -390,15 +417,16 @@ export async function downloadAsPdf(text: string, filename: string) {
 
 
 // ══════════════════════════════════════════════════════════
-//  DOCX via docx lib — professional layout
+//  DOCX via docx lib — tight professional layout
 // ══════════════════════════════════════════════════════════
 
-const FONT = 'Calibri';
+const FONT_DOC = 'Calibri';
 const TAB_RIGHT = TabStopPosition.MAX;
 
 function buildCvDocxParagraphs(text: string): Paragraph[] {
   const blocks = parseCvBlocks(text);
   const paras: Paragraph[] = [];
+  let prevType = '';
 
   for (const b of blocks) {
     switch (b.type) {
@@ -406,52 +434,50 @@ function buildCvDocxParagraphs(text: string): Paragraph[] {
         paras.push(new Paragraph({
           alignment: AlignmentType.CENTER,
           spacing: { after: 20 },
-          children: [new TextRun({ text: b.text, bold: true, size: 36, font: FONT })],
+          children: [new TextRun({ text: b.text, bold: true, size: 36, font: FONT_DOC })],
         }));
         break;
       case 'subtitle':
         paras.push(new Paragraph({
           alignment: AlignmentType.CENTER,
           spacing: { after: 20 },
-          children: [new TextRun({ text: b.text, size: 22, font: FONT, color: '444444' })],
+          children: [new TextRun({ text: b.text, size: 22, font: FONT_DOC, color: '444444' })],
         }));
         break;
       case 'contact':
         paras.push(new Paragraph({
           alignment: AlignmentType.CENTER,
-          spacing: { after: 100 },
-          children: [new TextRun({ text: b.text, size: 20, font: FONT, color: '555555' })],
+          spacing: { after: 80 },
+          children: [new TextRun({ text: b.text, size: 19, font: FONT_DOC, color: '555555' })],
         }));
         break;
       case 'header':
         paras.push(new Paragraph({
-          spacing: { before: 200, after: 60 },
-          border: { bottom: { style: BorderStyle.SINGLE, size: 8, color: '333333', space: 2 } },
-          children: [new TextRun({ text: b.text, bold: true, size: 22, font: FONT, characterSpacing: 60 })],
+          spacing: { before: prevType === 'bullet' ? 140 : 100, after: 40 },
+          border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: '444444', space: 1 } },
+          children: [new TextRun({ text: b.text, bold: true, size: 21, font: FONT_DOC, characterSpacing: 50 })],
         }));
         break;
       case 'divider':
         break;
       case 'dateline':
         paras.push(new Paragraph({
-          spacing: { before: 100, after: 20 },
+          spacing: { before: prevType === 'bullet' ? 80 : 40, after: 10 },
           tabStops: [{ type: TabStopType.RIGHT, position: TAB_RIGHT }],
           children: [
-            new TextRun({ text: b.left || '', bold: true, size: 21, font: FONT }),
+            new TextRun({ text: b.left || '', bold: true, size: 19, font: FONT_DOC }),
             new TextRun({ children: [new Tab()] }),
-            new TextRun({ text: b.right || '', size: 20, font: FONT, color: '555555' }),
+            new TextRun({ text: b.right || '', size: 18, font: FONT_DOC, color: '666666' }),
           ],
         }));
         break;
-      case 'bullet': {
-        const bulletText = b.text;
+      case 'bullet':
         paras.push(new Paragraph({
-          spacing: { after: 30 },
-          indent: { left: 280, hanging: 180 },
-          children: [new TextRun({ text: bulletText, size: 20, font: FONT })],
+          spacing: { after: 15 },
+          indent: { left: 240, hanging: 160 },
+          children: [new TextRun({ text: b.text, size: 19, font: FONT_DOC })],
         }));
         break;
-      }
       case 'competency-group': {
         const items = b.items || [];
         const half = Math.ceil(items.length / 2);
@@ -460,12 +486,12 @@ function buildCvDocxParagraphs(text: string): Paragraph[] {
           const left = r < half ? `\u2022 ${items[r]}` : '';
           const right = (r + half) < items.length ? `\u2022 ${items[r + half]}` : '';
           paras.push(new Paragraph({
-            spacing: { after: 20 },
+            spacing: { after: 10 },
             tabStops: [{ type: TabStopType.LEFT, position: 4800 }],
             children: [
-              new TextRun({ text: left, size: 20, font: FONT }),
+              new TextRun({ text: left, size: 19, font: FONT_DOC }),
               new TextRun({ children: [new Tab()] }),
-              new TextRun({ text: right, size: 20, font: FONT }),
+              new TextRun({ text: right, size: 19, font: FONT_DOC }),
             ],
           }));
         }
@@ -473,14 +499,15 @@ function buildCvDocxParagraphs(text: string): Paragraph[] {
       }
       case 'text':
         paras.push(new Paragraph({
-          spacing: { after: 30 },
-          children: [new TextRun({ text: b.text, size: 20, font: FONT })],
+          spacing: { after: 15 },
+          children: [new TextRun({ text: b.text, size: 19, font: FONT_DOC })],
         }));
         break;
       case 'blank':
-        paras.push(new Paragraph({ spacing: { after: 60 } }));
+        paras.push(new Paragraph({ spacing: { after: 20 } }));
         break;
     }
+    if (b.type !== 'divider') prevType = b.type;
   }
 
   return paras;
@@ -493,7 +520,7 @@ function buildCoverLetterDocxParagraphs(text: string): Paragraph[] {
   for (let i = 0; i < lines.length; i++) {
     const trimmed = lines[i].trim();
     if (!trimmed) {
-      paras.push(new Paragraph({ spacing: { after: 120 } }));
+      paras.push(new Paragraph({ spacing: { after: 100 } }));
       continue;
     }
 
@@ -501,7 +528,7 @@ function buildCoverLetterDocxParagraphs(text: string): Paragraph[] {
     if (i < 2 && trimmed === trimmed.toUpperCase() && trimmed.length > 3 && !trimmed.includes('|')) {
       paras.push(new Paragraph({
         spacing: { after: 20 },
-        children: [new TextRun({ text: trimmed, bold: true, size: 28, font: FONT })],
+        children: [new TextRun({ text: trimmed, bold: true, size: 28, font: FONT_DOC })],
       }));
       continue;
     }
@@ -510,14 +537,14 @@ function buildCoverLetterDocxParagraphs(text: string): Paragraph[] {
     if (i < 3 && trimmed.includes('|')) {
       paras.push(new Paragraph({
         spacing: { after: 60 },
-        children: [new TextRun({ text: trimmed, size: 20, font: FONT, color: '555555' })],
+        children: [new TextRun({ text: trimmed, size: 19, font: FONT_DOC, color: '555555' })],
       }));
       continue;
     }
 
     paras.push(new Paragraph({
-      spacing: { after: 60, line: 320 },
-      children: [new TextRun({ text: trimmed, size: 22, font: FONT })],
+      spacing: { after: 50, line: 300 },
+      children: [new TextRun({ text: trimmed, size: 22, font: FONT_DOC })],
     }));
   }
 
@@ -532,7 +559,7 @@ export async function downloadAsDocx(text: string, filename: string) {
     sections: [{
       properties: {
         page: {
-          margin: { top: 720, bottom: 720, left: 1080, right: 1080 },
+          margin: { top: 720, bottom: 720, left: 1020, right: 1020 },
         },
       },
       children,
