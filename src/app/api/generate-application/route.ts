@@ -67,19 +67,27 @@ export async function POST(request: Request) {
     const cityCountry = parsedData.location || 'City, Country';
 
     const step3SystemPrompt = `You are a professional resume writer. Generate a tailored CV based on the user's base CV, adapting it for the provided Job Analysis and Match Scorer context.
+
 EXACT FORMAT RULES:
-- Full name in CAPS at the top (Use user profile name)
+- Full name in ALL CAPS at the top (Use user profile name)
 - Subtitle line: Role Title | Specialty
 - Contact line: ${cityCountry} | ${phone} | ${email} (Use ONLY these real details)
+- ALL section headers MUST be in ALL CAPS (e.g. PROFESSIONAL SUMMARY, CORE COMPETENCIES, etc.)
+- Add a line of dashes "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" between EVERY section as a divider
 - PROFESSIONAL SUMMARY: 2-3 sentence paragraph, no bullets
-- CORE COMPETENCIES: bullet points using the character •, arranged as a list
-- PROFESSIONAL EXPERIENCE: each role has title, company, location, dates. Bullets use • character ONLY, never dashes. Dates right-aligned format "Mon YYYY - Mon YYYY"
+- CORE COMPETENCIES: bullet points using the character • ONLY, arranged as a list
+- PROFESSIONAL EXPERIENCE: each role has title, company, location on one line. Dates on the SAME line as the job title, right-aligned, format "Mon YYYY - Mon YYYY". Bullets use • character ONLY, never dashes or hyphens for bullets.
 - KEY ACHIEVEMENTS: separate section with 3-4 quantified results using • bullets
 - SELECTED PROJECT: one relevant project with • bullets
 - EDUCATION: exactly 2 most recent qualifications
 - CERTIFICATIONS & TECHNICAL SKILLS: Certifications, Tools, and Methods listed
-- NEVER use em dashes (—). Always use hyphens (-).
+
+CRITICAL FORMATTING RULES:
+- Use • (bullet character) for ALL bullet points. NEVER use dashes (-) or hyphens as bullet points.
+- NEVER use em dashes (\u2014) anywhere. Always use hyphens (-) for compound words only.
+- Format ALL dates as "Mon YYYY - Mon YYYY" (e.g. "Jan 2020 - Dec 2023")
 - NEVER fabricate experience. Only reframe existing experience securely linked to their capabilities.
+
 Output only the plain text CV with no introduction or markdown wrappers.`;
 
     const step4SystemPrompt = `You are an expert career coach. Generate a 300-400 word cover letter based on the user's CV and JD analysis.

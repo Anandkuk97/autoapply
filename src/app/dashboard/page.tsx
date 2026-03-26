@@ -2,8 +2,9 @@
 
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
-import { Copy, CheckCircle2, CircleDashed, Briefcase, FileText, Check, Loader2, Sparkles, Navigation, AlertCircle } from "lucide-react";
+import { Copy, CheckCircle2, CircleDashed, Briefcase, FileText, Check, Loader2, Sparkles, Navigation, AlertCircle, Download } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { downloadAsPdf, downloadAsDocx } from "@/lib/doc-export";
 
 export default function DashboardPage() {
   const [applications, setApplications] = useState<any[]>([]);
@@ -309,15 +310,29 @@ export default function DashboardPage() {
                   <FileText className="w-5 h-5 text-blue-600" />
                   Tailored CV
                 </h3>
-                <button 
-                  onClick={() => copyToClipboard(results.tailored_cv, 'cv')}
-                  className="p-2 hover:bg-gray-200 rounded-lg transition text-gray-700"
-                >
-                  {cvCopied ? <Check className="w-5 h-5 text-green-600" /> : <Copy className="w-5 h-5" />}
-                </button>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => copyToClipboard(results.tailored_cv, 'cv')}
+                    className="p-2 hover:bg-gray-200 rounded-lg transition text-gray-700" title="Copy"
+                  >
+                    {cvCopied ? <Check className="w-5 h-5 text-green-600" /> : <Copy className="w-5 h-5" />}
+                  </button>
+                  <button
+                    onClick={() => downloadAsPdf(results.tailored_cv, 'Tailored_CV')}
+                    className="p-2 hover:bg-gray-200 rounded-lg transition text-gray-700 flex items-center gap-1 text-xs font-semibold" title="Download PDF"
+                  >
+                    <Download className="w-4 h-4" /> PDF
+                  </button>
+                  <button
+                    onClick={() => downloadAsDocx(results.tailored_cv, 'Tailored_CV')}
+                    className="p-2 hover:bg-gray-200 rounded-lg transition text-gray-700 flex items-center gap-1 text-xs font-semibold" title="Download DOCX"
+                  >
+                    <Download className="w-4 h-4" /> DOCX
+                  </button>
+                </div>
               </div>
-              <div className="p-6 overflow-y-auto max-h-[500px] text-black text-sm whitespace-pre-wrap font-sans">
-                {results.tailored_cv}
+              <div className="p-6 overflow-y-auto max-h-[600px] text-black text-sm font-[ui-monospace,'Cascadia Code','Segoe UI Mono',monospace]">
+                <FormattedCV text={results.tailored_cv} />
               </div>
             </div>
 
@@ -328,14 +343,28 @@ export default function DashboardPage() {
                   <Navigation className="w-5 h-5 text-[var(--color-primary)]" />
                   Cover Letter
                 </h3>
-                <button 
-                  onClick={() => copyToClipboard(results.cover_letter, 'cl')}
-                  className="p-2 hover:bg-gray-200 rounded-lg transition text-gray-700"
-                >
-                  {clCopied ? <Check className="w-5 h-5 text-green-600" /> : <Copy className="w-5 h-5" />}
-                </button>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => copyToClipboard(results.cover_letter, 'cl')}
+                    className="p-2 hover:bg-gray-200 rounded-lg transition text-gray-700" title="Copy"
+                  >
+                    {clCopied ? <Check className="w-5 h-5 text-green-600" /> : <Copy className="w-5 h-5" />}
+                  </button>
+                  <button
+                    onClick={() => downloadAsPdf(results.cover_letter, 'Cover_Letter')}
+                    className="p-2 hover:bg-gray-200 rounded-lg transition text-gray-700 flex items-center gap-1 text-xs font-semibold" title="Download PDF"
+                  >
+                    <Download className="w-4 h-4" /> PDF
+                  </button>
+                  <button
+                    onClick={() => downloadAsDocx(results.cover_letter, 'Cover_Letter')}
+                    className="p-2 hover:bg-gray-200 rounded-lg transition text-gray-700 flex items-center gap-1 text-xs font-semibold" title="Download DOCX"
+                  >
+                    <Download className="w-4 h-4" /> DOCX
+                  </button>
+                </div>
               </div>
-              <div className="p-6 overflow-y-auto max-h-[500px] text-black text-sm whitespace-pre-wrap font-sans">
+              <div className="p-6 overflow-y-auto max-h-[600px] text-black text-sm whitespace-pre-wrap font-sans leading-relaxed">
                 {results.cover_letter}
               </div>
             </div>
@@ -422,6 +451,95 @@ export default function DashboardPage() {
         </div>
       </div>
     
+    </div>
+  );
+}
+
+// ── Styled CV renderer ──
+const CV_HEADERS = [
+  'PROFESSIONAL SUMMARY',
+  'CORE COMPETENCIES',
+  'PROFESSIONAL EXPERIENCE',
+  'KEY ACHIEVEMENTS',
+  'SELECTED PROJECT',
+  'EDUCATION',
+  'CERTIFICATIONS & TECHNICAL SKILLS',
+  'CERTIFICATIONS',
+  'TECHNICAL SKILLS',
+];
+const DIVIDER_RE = /^[━─\-=]{5,}$/;
+const DATE_RE = /(\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{4}\s*-\s*(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{4}\b|\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{4}\s*-\s*Present\b)/i;
+
+function FormattedCV({ text }: { text: string }) {
+  const lines = text.split('\n');
+  return (
+    <div className="space-y-0">
+      {lines.map((line, i) => {
+        const trimmed = line.trim();
+        if (!trimmed) return <div key={i} className="h-2" />;
+
+        // Divider
+        if (DIVIDER_RE.test(trimmed)) {
+          return <hr key={i} className="border-t-2 border-gray-300 my-3" />;
+        }
+
+        // Section header
+        if (CV_HEADERS.some(h => trimmed === h || trimmed.startsWith(h))) {
+          return (
+            <div key={i} className="font-bold text-[13px] tracking-widest text-gray-900 pt-3 pb-1 font-sans">
+              {trimmed}
+            </div>
+          );
+        }
+
+        // Line with date — split left/right
+        const dateMatch = trimmed.match(DATE_RE);
+        if (dateMatch) {
+          const idx = trimmed.indexOf(dateMatch[0]);
+          const left = trimmed.slice(0, idx).trim();
+          const right = dateMatch[0].trim();
+          return (
+            <div key={i} className="flex justify-between items-baseline gap-4 leading-snug">
+              <span className="font-semibold text-gray-900">{left}</span>
+              <span className="text-gray-500 whitespace-nowrap text-xs shrink-0">{right}</span>
+            </div>
+          );
+        }
+
+        // Bullet
+        if (trimmed.startsWith('\u2022')) {
+          return (
+            <div key={i} className="pl-4 -indent-3.5 leading-relaxed text-gray-800">
+              {trimmed}
+            </div>
+          );
+        }
+
+        // ALL CAPS name (first line)
+        if (i < 3 && trimmed === trimmed.toUpperCase() && trimmed.length > 3 && !trimmed.includes('|')) {
+          return (
+            <div key={i} className="text-center font-bold text-lg tracking-[3px] text-gray-900 font-sans pb-0.5">
+              {trimmed}
+            </div>
+          );
+        }
+
+        // Subtitle / contact (pipe-separated)
+        if (i < 5 && trimmed.includes('|')) {
+          return (
+            <div key={i} className="text-center text-gray-600 text-xs leading-relaxed">
+              {trimmed}
+            </div>
+          );
+        }
+
+        // Default
+        return (
+          <div key={i} className="leading-relaxed text-gray-800">
+            {trimmed}
+          </div>
+        );
+      })}
     </div>
   );
 }
