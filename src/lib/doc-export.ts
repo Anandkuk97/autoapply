@@ -120,8 +120,9 @@ function parseCvBlocks(text: string): CvBlock[] {
       continue;
     }
 
-    // Single date line (education) - e.g. "MBA - Operations Sep 2026"
-    if (currentSection === 'EDUCATION' || currentSection.startsWith('EDUCATION')) {
+    // Single date line (education, project) - e.g. "MBA - Operations Sep 2026"
+    if (currentSection === 'EDUCATION' || currentSection.startsWith('EDUCATION') ||
+        currentSection === 'SELECTED PROJECT' || currentSection.startsWith('SELECTED')) {
       const singleMatch = trimmed.match(SINGLE_DATE_RE);
       if (singleMatch && !trimmed.startsWith('\u2022')) {
         const left = trimmed.slice(0, trimmed.indexOf(singleMatch[1])).trim();

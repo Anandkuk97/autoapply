@@ -78,10 +78,10 @@ EXACT FORMAT RULES:
 - Add a line of dashes "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" between EVERY section as a divider
 - PROFESSIONAL SUMMARY: 2-3 concise sentences, no bullets
 - CORE COMPETENCIES: exactly 12 items using • character, arranged as a single list (will be displayed in 2 columns of 6)
-- PROFESSIONAL EXPERIENCE: Maximum 5 bullet points per role. Each bullet must start with a strong action verb and include a measurable impact where possible. Job title on one line with dates on the SAME line, format "Mon YYYY - Mon YYYY". Company and location on the next line.
+- PROFESSIONAL EXPERIENCE: Maximum 5 bullet points per role. Each bullet must start with a strong action verb and include a measurable impact where possible. Job title on one line with dates on the SAME line pushed to the far right, format "Mon YYYY - Mon YYYY". Company and location on the next line.
 - KEY ACHIEVEMENTS: Maximum 4 quantified results using • bullets
-- SELECTED PROJECT: one relevant project, maximum 2 bullets
-- EDUCATION: exactly 2 most recent qualifications. Format each as: "Degree Name    Mon YYYY" (degree on left, date right-aligned on SAME line). University name on the next line. CRITICAL: Use the EXACT dates from the user's original CV. Do NOT change, guess, or hallucinate education dates. If the user's CV shows a future date (e.g. Sep 2026 expected completion), use that exact date.
+- SELECTED PROJECT: Project name on one line with dates on the SAME line pushed to the far right (SAME format as work experience: "Mon YYYY - Mon YYYY" or "Mon YYYY"). Maximum 2 bullets.
+- EDUCATION: exactly 2 most recent qualifications. Each degree MUST have the date on the SAME line pushed to the far right (SAME format as work experience). Example: "MBA - Operations & Supply Chain Management    Sep 2026" where the date is far right. University name on the NEXT line below. CRITICAL: Use the EXACT dates from the user's original CV. Do NOT change, guess, or hallucinate education dates.
 - CERTIFICATIONS & TECHNICAL SKILLS: Three concise lines - Certifications, Tools, Methods
 
 CRITICAL FORMATTING RULES:
