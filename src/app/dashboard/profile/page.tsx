@@ -4,6 +4,7 @@ import { useState, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 import { UploadCloud, FileText, CheckCircle2, ArrowRight, Loader2, Save } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { extractTextFromPdf } from "@/lib/pdf-extract";
 
 export default function ProfilePage() {
   const router = useRouter();
@@ -62,12 +63,16 @@ export default function ProfilePage() {
     setIsParsing(true);
     setError("");
     try {
-      const formData = new FormData();
-      formData.append("file", selectedFile);
+      // Extract text client-side using pdfjs-dist
+      const cvText = await extractTextFromPdf(selectedFile);
+      if (!cvText || cvText.trim().length === 0) {
+        throw new Error("Could not extract text from PDF. The file may be scanned or image-based.");
+      }
 
       const res = await fetch("/api/parse-cv", {
         method: "POST",
-        body: formData,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: cvText }),
       });
 
       if (!res.ok) {

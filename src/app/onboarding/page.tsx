@@ -4,6 +4,7 @@ import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { UploadCloud, MapPin, Briefcase, CheckCircle2, ArrowRight, ArrowLeft, Sparkles } from "lucide-react";
 import Link from "next/link";
+import { extractTextFromPdf } from "@/lib/pdf-extract";
 
 export default function OnboardingPage() {
   const [step, setStep] = useState(1);
@@ -25,9 +26,14 @@ export default function OnboardingPage() {
     setIsUploading(true);
     try {
       if (file) {
-        const formData = new FormData();
-        formData.append("file", file);
-        await fetch("/api/parse-cv", { method: "POST", body: formData });
+        const cvText = await extractTextFromPdf(file);
+        if (cvText && cvText.trim().length > 0) {
+          await fetch("/api/parse-cv", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text: cvText }),
+          });
+        }
       }
     } catch (err) {
       console.warn("CV upload during onboarding failed, user can re-upload on profile page:", err);

@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
-const pdfParse = require('pdf-parse');
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY || '',
@@ -23,24 +22,14 @@ function extractJSON(text: string): Record<string, string> {
 
 export async function POST(request: Request) {
   try {
-    const formData = await request.formData();
-    const file = formData.get('file') as File;
-
-    if (!file) {
-      return NextResponse.json({ error: 'No file provided' }, { status: 400 });
-    }
-
-    const buffer = Buffer.from(await file.arrayBuffer());
-
-    // 1. Extract raw text from PDF
-    const data = await pdfParse(buffer);
-    const rawText = data.text;
+    const body = await request.json();
+    const rawText: string = body.text;
 
     if (!rawText || rawText.trim().length === 0) {
-      return NextResponse.json({ error: 'Could not extract text from PDF' }, { status: 400 });
+      return NextResponse.json({ error: 'No CV text provided' }, { status: 400 });
     }
 
-    // 2. Use Claude to extract structured fields
+    // Use Claude to extract structured fields
     const response = await anthropic.messages.create({
       model: 'claude-sonnet-4-20250514',
       max_tokens: 4096,
