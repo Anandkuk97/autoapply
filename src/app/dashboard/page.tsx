@@ -472,74 +472,125 @@ const DATE_RE = /(\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{4}\
 
 function FormattedCV({ text }: { text: string }) {
   const lines = text.split('\n');
-  return (
-    <div className="space-y-0">
-      {lines.map((line, i) => {
-        const trimmed = line.trim();
-        if (!trimmed) return <div key={i} className="h-2" />;
+  let currentSection = '';
+  let competencyBullets: string[] = [];
+  const elements: React.ReactNode[] = [];
+  let headerIdx = 0;
 
-        // Divider
-        if (DIVIDER_RE.test(trimmed)) {
-          return <hr key={i} className="border-t-2 border-gray-300 my-3" />;
-        }
+  const flushCompetencies = () => {
+    if (competencyBullets.length > 0) {
+      const half = Math.ceil(competencyBullets.length / 2);
+      const col1 = competencyBullets.slice(0, half);
+      const col2 = competencyBullets.slice(half);
+      elements.push(
+        <div key={`comp-${elements.length}`} className="grid grid-cols-2 gap-x-4 gap-y-0.5 mt-1.5 mb-1">
+          {col1.map((c, j) => (
+            <div key={`c1-${j}`} className="text-gray-800 text-[11px] leading-relaxed">{'\u2022'} {c}</div>
+          ))}
+          {col2.map((c, j) => (
+            <div key={`c2-${j}`} className="text-gray-800 text-[11px] leading-relaxed">{'\u2022'} {c}</div>
+          ))}
+        </div>
+      );
+      competencyBullets = [];
+    }
+  };
 
-        // Section header
-        if (CV_HEADERS.some(h => trimmed === h || trimmed.startsWith(h))) {
-          return (
-            <div key={i} className="font-bold text-[13px] tracking-widest text-gray-900 pt-3 pb-1 font-sans">
-              {trimmed}
-            </div>
-          );
-        }
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim();
+    const key = `line-${i}`;
 
-        // Line with date — split left/right
-        const dateMatch = trimmed.match(DATE_RE);
-        if (dateMatch) {
-          const idx = trimmed.indexOf(dateMatch[0]);
-          const left = trimmed.slice(0, idx).trim();
-          const right = dateMatch[0].trim();
-          return (
-            <div key={i} className="flex justify-between items-baseline gap-4 leading-snug">
-              <span className="font-semibold text-gray-900">{left}</span>
-              <span className="text-gray-500 whitespace-nowrap text-xs shrink-0">{right}</span>
-            </div>
-          );
-        }
+    if (!trimmed) {
+      if (currentSection === 'CORE COMPETENCIES') continue;
+      flushCompetencies();
+      elements.push(<div key={key} className="h-1.5" />);
+      continue;
+    }
 
-        // Bullet
-        if (trimmed.startsWith('\u2022')) {
-          return (
-            <div key={i} className="pl-4 -indent-3.5 leading-relaxed text-gray-800">
-              {trimmed}
-            </div>
-          );
-        }
+    if (DIVIDER_RE.test(trimmed)) {
+      flushCompetencies();
+      // Skip explicit dividers — we draw borders under headers
+      continue;
+    }
 
-        // ALL CAPS name (first line)
-        if (i < 3 && trimmed === trimmed.toUpperCase() && trimmed.length > 3 && !trimmed.includes('|')) {
-          return (
-            <div key={i} className="text-center font-bold text-lg tracking-[3px] text-gray-900 font-sans pb-0.5">
-              {trimmed}
-            </div>
-          );
-        }
+    if (CV_HEADERS.some(h => trimmed === h || trimmed.startsWith(h))) {
+      flushCompetencies();
+      currentSection = trimmed;
+      elements.push(
+        <div key={key} className="font-bold text-[11.5px] tracking-[2px] text-gray-900 pt-3 pb-1 border-b-[1.5px] border-gray-800 font-sans">
+          {trimmed}
+        </div>
+      );
+      continue;
+    }
 
-        // Subtitle / contact (pipe-separated)
-        if (i < 5 && trimmed.includes('|')) {
-          return (
-            <div key={i} className="text-center text-gray-600 text-xs leading-relaxed">
-              {trimmed}
-            </div>
-          );
-        }
-
-        // Default
-        return (
-          <div key={i} className="leading-relaxed text-gray-800">
+    // Before first header: name/subtitle/contact
+    if (!currentSection) {
+      if (headerIdx === 0 && trimmed === trimmed.toUpperCase() && trimmed.length > 3 && !trimmed.includes('|')) {
+        elements.push(
+          <div key={key} className="text-center font-bold text-[18px] tracking-[3px] text-gray-900 font-sans mb-0">
             {trimmed}
           </div>
         );
-      })}
-    </div>
-  );
+        headerIdx++;
+        continue;
+      }
+      if (trimmed.includes('|')) {
+        const isContact = trimmed.includes('@') || /\d{5,}/.test(trimmed.replace(/[\s\-+()]/g, ''));
+        elements.push(
+          <div key={key} className={`text-center text-[10px] leading-relaxed ${isContact ? 'text-gray-500 mb-2' : 'text-gray-600 mb-0'}`}>
+            {trimmed}
+          </div>
+        );
+        headerIdx++;
+        continue;
+      }
+      headerIdx++;
+    }
+
+    // CORE COMPETENCIES: collect bullets for 2-column
+    if (currentSection === 'CORE COMPETENCIES' && trimmed.startsWith('\u2022')) {
+      competencyBullets.push(trimmed.replace(/^\u2022\s*/, ''));
+      continue;
+    }
+
+    // Date line — left text / right-aligned date
+    const dateMatch = trimmed.match(DATE_RE);
+    if (dateMatch) {
+      flushCompetencies();
+      const idx = trimmed.indexOf(dateMatch[0]);
+      const left = trimmed.slice(0, idx).trim();
+      const right = dateMatch[0].trim();
+      elements.push(
+        <div key={key} className="flex justify-between items-baseline gap-4 mt-2 mb-0.5">
+          <span className="font-bold text-[11px] text-gray-900">{left}</span>
+          <span className="text-gray-500 whitespace-nowrap text-[10px] shrink-0">{right}</span>
+        </div>
+      );
+      continue;
+    }
+
+    // Bullet
+    if (trimmed.startsWith('\u2022')) {
+      flushCompetencies();
+      elements.push(
+        <div key={key} className="pl-3.5 -indent-3 leading-relaxed text-gray-800 text-[10.5px]">
+          {trimmed}
+        </div>
+      );
+      continue;
+    }
+
+    // Default text
+    flushCompetencies();
+    elements.push(
+      <div key={key} className="leading-relaxed text-gray-800 text-[10.5px]">
+        {trimmed}
+      </div>
+    );
+  }
+
+  flushCompetencies();
+
+  return <div className="space-y-0">{elements}</div>;
 }

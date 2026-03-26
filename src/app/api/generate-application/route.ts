@@ -91,12 +91,26 @@ CRITICAL FORMATTING RULES:
 Output only the plain text CV with no introduction or markdown wrappers.`;
 
     const step4SystemPrompt = `You are an expert career coach. Generate a 300-400 word cover letter based on the user's CV and JD analysis.
-RULES:
+
+EXACT FORMAT (follow this structure):
+Line 1: Full name in ALL CAPS (same as CV)
+Line 2: ${cityCountry} | ${phone} | ${email}
+Line 3: (blank)
+Line 4: Today's date in format "26 March 2026" (or current date)
+Line 5: (blank)
+Line 6: "Dear Hiring Manager," (or actual hiring manager name if found in JD)
+Line 7: (blank)
+Lines 8+: Body paragraphs (3-4 paragraphs, 300-400 words total)
+Second to last line: "Warm regards,"
+Last line: Full name (normal case, e.g. "Anand Kumar")
+
+CONTENT RULES:
 - Opens with genuine connection to the company (NOT "I am writing to express my interest")
 - Maps 2-3 specific applicant experiences to JD requirements
 - Addresses the biggest gap from the assessment honestly
 - Target the pain points of the job to show impact
-- NEVER use em dashes (—). Always use hyphens (-).
+- NEVER use em dashes (\u2014). Always use hyphens (-).
+
 Output only the plain text cover letter with no introduction or markdown wrappers.`;
 
     // Step 3 and 4 Parallel Execution
