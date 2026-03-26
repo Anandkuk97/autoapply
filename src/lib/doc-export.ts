@@ -11,8 +11,11 @@ import {
   BorderStyle,
 } from 'docx';
 
-// ── Constants ──
-const CV_SECTION_HEADERS = [
+// ══════════════════════════════════════════════════════════
+//  PARSER — shared by PDF and DOCX
+// ══════════════════════════════════════════════════════════
+
+const SECTION_HEADERS = [
   'PROFESSIONAL SUMMARY',
   'CORE COMPETENCIES',
   'PROFESSIONAL EXPERIENCE',
@@ -25,321 +28,427 @@ const CV_SECTION_HEADERS = [
 ];
 
 const DIVIDER_RE = /^[━─\-=]{5,}$/;
-// Matches date ranges like "Jan 2020 - Dec 2023" or "Jan 2020 - Present"
-const DATE_RE = /(\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{4}\s*-\s*(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{4}\b|\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{4}\s*-\s*Present\b)/i;
-// Matches standalone single dates like "Sep 2026" at end of line (for education)
+const DATE_RANGE_RE = /(\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{4}\s*-\s*(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{4}\b|\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{4}\s*-\s*Present\b)/i;
 const SINGLE_DATE_RE = /(\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{4})\s*$/i;
 
-function isSectionHeader(line: string): boolean {
-  const t = line.trim();
-  return CV_SECTION_HEADERS.some(h => t === h || t.startsWith(h));
-}
-function isDivider(line: string): boolean {
-  return DIVIDER_RE.test(line.trim());
-}
+// Detect "Certifications:" or "Tools:" or "Methods:" prefix
+const CERT_PREFIX_RE = /^(Certifications|Tools|Methods)\s*:\s*/i;
 
-// ── Parse structured blocks from CV text ──
-interface CvBlock {
-  type: 'name' | 'subtitle' | 'contact' | 'header' | 'divider' | 'dateline' | 'bullet' | 'competency-group' | 'text' | 'blank';
+interface Block {
+  type: 'name' | 'subtitle' | 'contact' | 'header' | 'divider' | 'dateline' |
+        'bullet' | 'competencies' | 'text' | 'blank' | 'certline';
   text: string;
   left?: string;
   right?: string;
   items?: string[];
+  prefix?: string;
+  body?: string;
 }
 
-function parseCvBlocks(text: string): CvBlock[] {
+function parseBlocks(text: string): Block[] {
   const lines = text.split('\n');
-  const blocks: CvBlock[] = [];
-  let headerIndex = 0;
-  let currentSection = '';
-  let competencyBullets: string[] = [];
+  const blocks: Block[] = [];
+  let hdrIdx = 0;
+  let section = '';
+  let compBullets: string[] = [];
 
-  const flushCompetencies = () => {
-    if (competencyBullets.length > 0) {
-      blocks.push({ type: 'competency-group', text: '', items: [...competencyBullets] });
-      competencyBullets = [];
+  const flushComp = () => {
+    if (compBullets.length > 0) {
+      blocks.push({ type: 'competencies', text: '', items: [...compBullets] });
+      compBullets = [];
     }
   };
 
   for (let i = 0; i < lines.length; i++) {
-    const trimmed = lines[i].trim();
+    const t = lines[i].trim();
 
-    if (!trimmed) {
-      if (currentSection === 'CORE COMPETENCIES') continue;
-      flushCompetencies();
+    if (!t) {
+      if (section === 'CORE COMPETENCIES') continue;
+      flushComp();
       blocks.push({ type: 'blank', text: '' });
       continue;
     }
-
-    if (isDivider(trimmed)) {
-      flushCompetencies();
-      blocks.push({ type: 'divider', text: trimmed });
+    if (DIVIDER_RE.test(t)) {
+      flushComp();
+      blocks.push({ type: 'divider', text: t });
+      continue;
+    }
+    if (SECTION_HEADERS.some(h => t === h || t.startsWith(h))) {
+      flushComp();
+      section = t;
+      blocks.push({ type: 'header', text: t });
       continue;
     }
 
-    if (isSectionHeader(trimmed)) {
-      flushCompetencies();
-      currentSection = trimmed;
-      blocks.push({ type: 'header', text: trimmed });
-      continue;
-    }
-
-    // Before first section header: name/subtitle/contact
-    if (!currentSection && !blocks.some(b => b.type === 'header')) {
-      if (headerIndex === 0 && trimmed === trimmed.toUpperCase() && trimmed.length > 3 && !trimmed.includes('|')) {
-        blocks.push({ type: 'name', text: trimmed });
-        headerIndex++;
+    // Name / subtitle / contact (before any section header)
+    if (!section && !blocks.some(b => b.type === 'header')) {
+      if (hdrIdx === 0 && t === t.toUpperCase() && t.length > 3 && !t.includes('|')) {
+        blocks.push({ type: 'name', text: t });
+        hdrIdx++;
         continue;
       }
-      if (headerIndex <= 2 && trimmed.includes('|')) {
-        if (trimmed.includes('@') || /\d{5,}/.test(trimmed.replace(/[\s\-+()]/g, ''))) {
-          blocks.push({ type: 'contact', text: trimmed });
-        } else {
-          blocks.push({ type: 'subtitle', text: trimmed });
-        }
-        headerIndex++;
+      if (hdrIdx <= 2 && t.includes('|')) {
+        const isContact = t.includes('@') || /\d{5,}/.test(t.replace(/[\s\-+()]/g, ''));
+        blocks.push({ type: isContact ? 'contact' : 'subtitle', text: t });
+        hdrIdx++;
         continue;
       }
-      headerIndex++;
+      hdrIdx++;
     }
 
-    // CORE COMPETENCIES: collect bullets for 2-column
-    if (currentSection === 'CORE COMPETENCIES' && trimmed.startsWith('\u2022')) {
-      competencyBullets.push(trimmed.replace(/^\u2022\s*/, ''));
+    // Core competencies bullets → collect
+    if (section === 'CORE COMPETENCIES' && t.startsWith('\u2022')) {
+      compBullets.push(t.replace(/^\u2022\s*/, ''));
       continue;
     }
 
-    // Date range line (experience, project)
-    const dateMatch = trimmed.match(DATE_RE);
-    if (dateMatch) {
-      flushCompetencies();
-      const idx = trimmed.indexOf(dateMatch[0]);
-      const left = trimmed.slice(0, idx).trim();
-      const right = dateMatch[0].trim();
-      blocks.push({ type: 'dateline', text: trimmed, left, right });
+    // Certifications & Technical Skills — lines with "Prefix: value"
+    if ((section === 'CERTIFICATIONS & TECHNICAL SKILLS' || section === 'CERTIFICATIONS' || section === 'TECHNICAL SKILLS')) {
+      const pm = t.match(CERT_PREFIX_RE);
+      if (pm) {
+        flushComp();
+        blocks.push({ type: 'certline', text: t, prefix: pm[1] + ':', body: t.slice(pm[0].length) });
+        continue;
+      }
+    }
+
+    // Date range (experience / project)
+    const drm = t.match(DATE_RANGE_RE);
+    if (drm) {
+      flushComp();
+      const idx = t.indexOf(drm[0]);
+      blocks.push({ type: 'dateline', text: t, left: t.slice(0, idx).trim(), right: drm[0].trim() });
       continue;
     }
 
-    // Single date line (education, project) - e.g. "MBA - Operations Sep 2026"
-    if (currentSection === 'EDUCATION' || currentSection.startsWith('EDUCATION') ||
-        currentSection === 'SELECTED PROJECT' || currentSection.startsWith('SELECTED')) {
-      const singleMatch = trimmed.match(SINGLE_DATE_RE);
-      if (singleMatch && !trimmed.startsWith('\u2022')) {
-        const left = trimmed.slice(0, trimmed.indexOf(singleMatch[1])).trim();
-        const right = singleMatch[1].trim();
+    // Single date (education / project)
+    if (section === 'EDUCATION' || section.startsWith('EDUCATION') ||
+        section === 'SELECTED PROJECT' || section.startsWith('SELECTED')) {
+      const sdm = t.match(SINGLE_DATE_RE);
+      if (sdm && !t.startsWith('\u2022')) {
+        const left = t.slice(0, t.indexOf(sdm[1])).trim();
         if (left.length > 3) {
-          blocks.push({ type: 'dateline', text: trimmed, left, right });
+          blocks.push({ type: 'dateline', text: t, left, right: sdm[1].trim() });
           continue;
         }
       }
     }
 
     // Bullet
-    if (trimmed.startsWith('\u2022')) {
-      flushCompetencies();
-      blocks.push({ type: 'bullet', text: trimmed });
+    if (t.startsWith('\u2022')) {
+      flushComp();
+      blocks.push({ type: 'bullet', text: t });
       continue;
     }
 
-    flushCompetencies();
-    blocks.push({ type: 'text', text: trimmed });
+    flushComp();
+    blocks.push({ type: 'text', text: t });
   }
 
-  flushCompetencies();
+  flushComp();
   return blocks;
 }
 
 
 // ══════════════════════════════════════════════════════════
-//  PDF via jsPDF — tight one-page layout
+//  CV PDF — jsPDF with exact measurements
 // ══════════════════════════════════════════════════════════
 
-const PAGE_W = 210; // A4 mm
-const PAGE_H = 297;
-const MARGIN_TOP = 20;
-const MARGIN_BOTTOM = 20;
-const MARGIN_LEFT = 18;
-const MARGIN_RIGHT = 18;
-const CONTENT_W = PAGE_W - MARGIN_LEFT - MARGIN_RIGHT;
+const PG_W = 210;
+const PG_H = 297;
+const ML = 18;   // left margin
+const MR = 18;   // right margin
+const MT = 20;   // top margin
+const MB = 20;   // bottom margin
+const CW = PG_W - ML - MR; // content width
+const MAX_Y = PG_H - MB;   // 277mm
 
-// Spacing constants (mm) — tight for one-page fit
-const SP = {
-  afterName: 1.5,        // gap after name
-  afterSubtitle: 1,      // gap after subtitle line
-  afterContact: 3,       // gap after contact block to first section (~8pt)
-  beforeHeader: 3.5,     // gap before section header (~10pt from last bullet)
-  afterHeaderLine: 1.5,  // gap after header underline (~4pt)
-  betweenBullets: 0.7,   // gap between bullet lines (~2pt)
-  afterBulletBlock: 0,   // no extra gap after bullets (beforeHeader handles it)
-  betweenRoles: 2.8,     // gap between experience roles (~8pt)
-  lineHeight: 3.7,       // body text line height (~1.3 at 10pt)
-  bulletLineHeight: 3.6, // bullet text line height
+interface Sizing {
+  bodyFont: number;       // normal body font pt
+  bulletFont: number;     // bullet font pt
+  compFont: number;       // competency font pt
+  summaryLH: number;      // summary line height mm
+  bulletLH: number;       // bullet line height mm
+  compLH: number;         // competency row height mm
+  certLH: number;         // cert line height mm
+  betweenBullets: number; // extra gap between bullets mm
+  betweenRoles: number;   // gap between experience roles mm
+  beforeHeader: number;   // gap before section header mm
+  afterHeaderLine: number; // gap after header underline mm
+  eduGap: number;         // gap between education entries mm
+}
+
+const NORMAL: Sizing = {
+  bodyFont: 9.5,
+  bulletFont: 9,
+  compFont: 9,
+  summaryLH: 3.8,
+  bulletLH: 3.6,
+  compLH: 4.2,
+  certLH: 3.8,
+  betweenBullets: 1.2,
+  betweenRoles: 4,
+  beforeHeader: 5,
+  afterHeaderLine: 3,
+  eduGap: 3,
+};
+
+const COMPACT: Sizing = {
+  bodyFont: 9,
+  bulletFont: 8.5,
+  compFont: 8.5,
+  summaryLH: 3.5,
+  bulletLH: 3.3,
+  compLH: 3.9,
+  certLH: 3.5,
+  betweenBullets: 0.9,
+  betweenRoles: 3,
+  beforeHeader: 4,
+  afterHeaderLine: 2.5,
+  eduGap: 2.5,
 };
 
 function wrapText(doc: any, text: string, maxWidth: number): string[] {
   const words = text.split(' ');
   const lines: string[] = [];
-  let current = '';
-  for (const word of words) {
-    const test = current ? `${current} ${word}` : word;
-    if (doc.getTextWidth(test) > maxWidth && current) {
-      lines.push(current);
-      current = word;
+  let cur = '';
+  for (const w of words) {
+    const test = cur ? `${cur} ${w}` : w;
+    if (doc.getTextWidth(test) > maxWidth && cur) {
+      lines.push(cur);
+      cur = w;
     } else {
-      current = test;
+      cur = test;
     }
   }
-  if (current) lines.push(current);
+  if (cur) lines.push(cur);
   return lines.length ? lines : [''];
 }
 
-function buildCvPdf(doc: any, text: string) {
-  const blocks = parseCvBlocks(text);
-  let y = MARGIN_TOP;
+function renderCvPdf(doc: any, blocks: Block[], sz: Sizing, maxBulletsPerRole: number): number {
+  let y = MT;
   let prevType = '';
+  let bulletsInCurrentRole = 0;
 
   for (let bi = 0; bi < blocks.length; bi++) {
     const b = blocks[bi];
 
     switch (b.type) {
+      // ─── NAME ───
       case 'name': {
         doc.setFont('helvetica', 'bold');
-        doc.setFontSize(18);
-        doc.setTextColor(17, 17, 17);
-        const nameW = doc.getTextWidth(b.text);
-        doc.text(b.text, (PAGE_W - nameW) / 2, y);
-        y += 6 + SP.afterName;
+        doc.setFontSize(16);
+        doc.setTextColor(0, 0, 0);
+        doc.text(b.text, PG_W / 2, y, { align: 'center' });
+        y += 5.5 + 2; // ~16pt descent + 2mm gap
         break;
       }
+
+      // ─── SUBTITLE ───
       case 'subtitle': {
         doc.setFont('helvetica', 'normal');
-        doc.setFontSize(11);
-        doc.setTextColor(68, 68, 68);
-        const subW = doc.getTextWidth(b.text);
-        doc.text(b.text, (PAGE_W - subW) / 2, y);
-        y += 4 + SP.afterSubtitle;
+        doc.setFontSize(10);
+        doc.setTextColor(0, 0, 0);
+        doc.text(b.text, PG_W / 2, y, { align: 'center' });
+        y += 3.5 + 1.5; // 10pt descent + 1.5mm gap
         break;
       }
+
+      // ─── CONTACT ───
       case 'contact': {
         doc.setFont('helvetica', 'normal');
-        doc.setFontSize(9.5);
-        doc.setTextColor(85, 85, 85);
-        const conW = doc.getTextWidth(b.text);
-        doc.text(b.text, (PAGE_W - conW) / 2, y);
-        y += 3.5 + SP.afterContact;
-        break;
-      }
-      case 'header': {
-        // Space before header (unless it's the very first element after contact)
-        if (prevType && prevType !== 'contact' && prevType !== 'blank') {
-          y += SP.beforeHeader;
-        } else if (prevType === 'blank') {
-          // blank already added small gap, just add a tiny bit more
-          y += 1;
-        }
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(10.5);
-        doc.setTextColor(17, 17, 17);
-        doc.text(b.text, MARGIN_LEFT, y);
-        y += 1.5;
-        doc.setDrawColor(60, 60, 60);
-        doc.setLineWidth(0.3);
-        doc.line(MARGIN_LEFT, y, PAGE_W - MARGIN_RIGHT, y);
-        y += SP.afterHeaderLine;
-        break;
-      }
-      case 'divider':
-        // Skip — header has underline
-        break;
-      case 'dateline': {
-        // Add role gap if previous was bullet (new role within same section)
-        if (prevType === 'bullet') {
-          y += SP.betweenRoles;
-        } else {
-          y += 1;
-        }
-        // Left: bold title
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(9.5);
-        doc.setTextColor(17, 17, 17);
-        doc.text(b.left || '', MARGIN_LEFT, y);
-        // Right: date
-        doc.setFont('helvetica', 'normal');
         doc.setFontSize(9);
-        doc.setTextColor(100, 100, 100);
-        const dateW = doc.getTextWidth(b.right || '');
-        doc.text(b.right || '', PAGE_W - MARGIN_RIGHT - dateW, y);
-        y += 3.8;
+        doc.setTextColor(85, 85, 85);
+        doc.text(b.text, PG_W / 2, y, { align: 'center' });
+        y += 3 + 5; // 9pt descent + 5mm gap
+        // Thin divider line after contact block
+        doc.setDrawColor(204, 204, 204);
+        doc.setLineWidth(0.1);
+        doc.line(ML, y, PG_W - MR, y);
+        y += 5; // 5mm gap after line
         break;
       }
-      case 'bullet': {
+
+      // ─── SECTION HEADER ───
+      case 'header': {
+        if (prevType && prevType !== 'contact' && prevType !== 'divider') {
+          y += sz.beforeHeader;
+        }
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(10);
+        doc.setTextColor(0, 0, 0);
+        doc.text(b.text, ML, y);
+        y += 1.5;
+        doc.setDrawColor(204, 204, 204);
+        doc.setLineWidth(0.1);
+        doc.line(ML, y, PG_W - MR, y);
+        y += sz.afterHeaderLine;
+        bulletsInCurrentRole = 0;
+        break;
+      }
+
+      // ─── DIVIDER ───
+      case 'divider':
+        break; // skip, header draws its own line
+
+      // ─── DATELINE (title left, date right) ───
+      case 'dateline': {
+        if (prevType === 'bullet' || prevType === 'text') {
+          y += sz.betweenRoles;
+          bulletsInCurrentRole = 0;
+        }
+        // Title — bold left
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(10);
+        doc.setTextColor(0, 0, 0);
+        doc.text(b.left || '', ML, y);
+        // Date — normal right-aligned
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(9.5);
-        doc.setTextColor(34, 34, 34);
-        const bulletText = b.text.replace(/^\u2022\s*/, '');
-        const indent = 4;
-        const bulletMaxW = CONTENT_W - indent - 3;
-        const bLines = wrapText(doc, bulletText, bulletMaxW);
-
-        // Bullet character
-        doc.text('\u2022', MARGIN_LEFT + indent, y);
-        for (let li = 0; li < bLines.length; li++) {
-          doc.text(bLines[li], MARGIN_LEFT + indent + 3, y);
-          y += SP.bulletLineHeight;
-        }
-        y += SP.betweenBullets;
+        doc.setTextColor(0, 0, 0);
+        doc.text(b.right || '', PG_W - MR, y, { align: 'right' });
+        y += 4;
         break;
       }
-      case 'competency-group': {
+
+      // ─── BULLET ───
+      case 'bullet': {
+        bulletsInCurrentRole++;
+        if (bulletsInCurrentRole > maxBulletsPerRole) break; // skip excess bullets
+
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(sz.bulletFont);
+        doc.setTextColor(51, 51, 51);
+        const rawText = b.text.replace(/^\u2022\s*/, '');
+        const bulletX = ML + 5;  // bullet char at 5mm indent
+        const textX = ML + 9;    // text at 9mm (hanging indent)
+        const textMaxW = CW - 9;
+        const bLines = wrapText(doc, rawText, textMaxW);
+
+        // Bullet character on first line
+        doc.text('\u2022', bulletX, y);
+        for (let li = 0; li < bLines.length; li++) {
+          doc.text(bLines[li], textX, y);
+          y += sz.bulletLH;
+        }
+        y += sz.betweenBullets;
+        break;
+      }
+
+      // ─── COMPETENCIES (2-column) ───
+      case 'competencies': {
         const items = b.items || [];
         const half = Math.ceil(items.length / 2);
         const col1 = items.slice(0, half);
         const col2 = items.slice(half);
-        const colW = CONTENT_W / 2 - 2;
-        y += 1;
         doc.setFont('helvetica', 'normal');
-        doc.setFontSize(9.5);
-        doc.setTextColor(34, 34, 34);
+        doc.setFontSize(sz.compFont);
+        doc.setTextColor(51, 51, 51);
 
-        const rowCount = Math.max(col1.length, col2.length);
-        for (let r = 0; r < rowCount; r++) {
-          if (r < col1.length) {
-            doc.text(`\u2022 ${col1[r]}`, MARGIN_LEFT + 2, y);
-          }
-          if (r < col2.length) {
-            doc.text(`\u2022 ${col2[r]}`, MARGIN_LEFT + colW + 4, y);
-          }
-          y += 3.8;
+        const rows = Math.max(col1.length, col2.length);
+        const colMid = 105; // page center for right column
+        for (let r = 0; r < rows; r++) {
+          if (r < col1.length) doc.text(`\u2022  ${col1[r]}`, ML + 2, y);
+          if (r < col2.length) doc.text(`\u2022  ${col2[r]}`, colMid, y);
+          y += sz.compLH;
         }
         break;
       }
-      case 'text': {
+
+      // ─── CERTLINE (prefix bold, body normal) ───
+      case 'certline': {
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(sz.bodyFont);
+        doc.setTextColor(51, 51, 51);
+        const prefixW = doc.getTextWidth(b.prefix + ' ');
+        doc.text(b.prefix + ' ', ML, y);
         doc.setFont('helvetica', 'normal');
-        doc.setFontSize(9.5);
-        doc.setTextColor(34, 34, 34);
-        const tLines = wrapText(doc, b.text, CONTENT_W);
-        for (const tl of tLines) {
-          doc.text(tl, MARGIN_LEFT, y);
-          y += SP.lineHeight;
+        // Wrap body after prefix
+        const bodyMaxW = CW - prefixW;
+        const cLines = wrapText(doc, b.body || '', bodyMaxW);
+        doc.text(cLines[0], ML + prefixW, y);
+        y += sz.certLH;
+        for (let li = 1; li < cLines.length; li++) {
+          doc.text(cLines[li], ML + prefixW, y);
+          y += sz.certLH;
         }
         break;
       }
+
+      // ─── TEXT (company line, summary paragraph, etc.) ───
+      case 'text': {
+        // If immediately after a dateline, this is likely company/location line
+        if (prevType === 'dateline') {
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(9);
+          doc.setTextColor(85, 85, 85);
+          doc.text(b.text, ML, y);
+          y += 3.5;
+        } else {
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(sz.bodyFont);
+          doc.setTextColor(51, 51, 51);
+          const tLines = wrapText(doc, b.text, CW);
+          for (const tl of tLines) {
+            doc.text(tl, ML, y);
+            y += sz.summaryLH;
+          }
+        }
+        break;
+      }
+
+      // ─── BLANK ───
       case 'blank':
         y += 1;
         break;
     }
 
-    if (b.type !== 'divider') {
-      prevType = b.type;
-    }
+    if (b.type !== 'divider') prevType = b.type;
   }
 
-  return y; // return final y for overflow detection
+  return y;
 }
+
+function buildCvPdf(doc: any, text: string) {
+  const blocks = parseBlocks(text);
+
+  // First pass: try normal sizing
+  let finalY = renderCvPdf(doc, blocks, NORMAL, 5);
+
+  if (finalY > MAX_Y) {
+    // Overflow — clear and retry with compact sizing
+    // jsPDF doesn't support clearing, so we delete all pages and start fresh
+    const totalPages = doc.getNumberOfPages();
+    // Remove extra pages if any were added
+    while (doc.getNumberOfPages() > 1) {
+      doc.deletePage(doc.getNumberOfPages());
+    }
+    // Clear the single remaining page by adding a white rectangle
+    doc.setFillColor(255, 255, 255);
+    doc.rect(0, 0, PG_W, PG_H, 'F');
+
+    finalY = renderCvPdf(doc, blocks, COMPACT, 5);
+
+    if (finalY > MAX_Y) {
+      // Still overflows — retry compact with max 4 bullets
+      while (doc.getNumberOfPages() > 1) {
+        doc.deletePage(doc.getNumberOfPages());
+      }
+      doc.setFillColor(255, 255, 255);
+      doc.rect(0, 0, PG_W, PG_H, 'F');
+      renderCvPdf(doc, blocks, COMPACT, 4);
+    }
+  }
+}
+
+
+// ══════════════════════════════════════════════════════════
+//  COVER LETTER PDF
+// ══════════════════════════════════════════════════════════
 
 function buildCoverLetterPdf(doc: any, text: string) {
   const lines = text.split('\n');
-  let y = MARGIN_TOP;
+  let y = MT;
   let lineIdx = 0;
 
   for (const line of lines) {
@@ -355,8 +464,8 @@ function buildCoverLetterPdf(doc: any, text: string) {
     if (lineIdx < 2 && trimmed === trimmed.toUpperCase() && trimmed.length > 3 && !trimmed.includes('|')) {
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(14);
-      doc.setTextColor(17, 17, 17);
-      doc.text(trimmed, MARGIN_LEFT, y);
+      doc.setTextColor(0, 0, 0);
+      doc.text(trimmed, ML, y);
       y += 6;
       lineIdx++;
       continue;
@@ -367,8 +476,13 @@ function buildCoverLetterPdf(doc: any, text: string) {
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(9.5);
       doc.setTextColor(85, 85, 85);
-      doc.text(trimmed, MARGIN_LEFT, y);
+      doc.text(trimmed, ML, y);
       y += 4.5;
+      // Thin line after contact
+      doc.setDrawColor(204, 204, 204);
+      doc.setLineWidth(0.1);
+      doc.line(ML, y, PG_W - MR, y);
+      y += 5;
       lineIdx++;
       continue;
     }
@@ -377,8 +491,8 @@ function buildCoverLetterPdf(doc: any, text: string) {
     if (/^(Dear|Warm regards|Kind regards|Sincerely|Best regards|Yours)/i.test(trimmed)) {
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(11);
-      doc.setTextColor(17, 17, 17);
-      doc.text(trimmed, MARGIN_LEFT, y);
+      doc.setTextColor(0, 0, 0);
+      doc.text(trimmed, ML, y);
       y += 6;
       lineIdx++;
       continue;
@@ -387,20 +501,25 @@ function buildCoverLetterPdf(doc: any, text: string) {
     // Body text — wrap
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(11);
-    doc.setTextColor(34, 34, 34);
-    const pLines = wrapText(doc, trimmed, CONTENT_W);
+    doc.setTextColor(51, 51, 51);
+    const pLines = wrapText(doc, trimmed, CW);
     for (const pl of pLines) {
-      if (y > PAGE_H - MARGIN_BOTTOM) {
+      if (y > MAX_Y) {
         doc.addPage();
-        y = MARGIN_TOP;
+        y = MT;
       }
-      doc.text(pl, MARGIN_LEFT, y);
+      doc.text(pl, ML, y);
       y += 4.8;
     }
     y += 1;
     lineIdx++;
   }
 }
+
+
+// ══════════════════════════════════════════════════════════
+//  PDF EXPORT
+// ══════════════════════════════════════════════════════════
 
 export async function downloadAsPdf(text: string, filename: string) {
   const { jsPDF } = await import('jspdf');
@@ -418,143 +537,157 @@ export async function downloadAsPdf(text: string, filename: string) {
 
 
 // ══════════════════════════════════════════════════════════
-//  DOCX via docx lib — tight professional layout
+//  DOCX — matching professional layout
 // ══════════════════════════════════════════════════════════
 
-const FONT_DOC = 'Calibri';
-const TAB_RIGHT = TabStopPosition.MAX;
+const FD = 'Calibri';
+const TAB_R = TabStopPosition.MAX;
 
-function buildCvDocxParagraphs(text: string): Paragraph[] {
-  const blocks = parseCvBlocks(text);
-  const paras: Paragraph[] = [];
-  let prevType = '';
+function buildCvDocx(text: string): Paragraph[] {
+  const blocks = parseBlocks(text);
+  const p: Paragraph[] = [];
+  let prev = '';
 
   for (const b of blocks) {
     switch (b.type) {
       case 'name':
-        paras.push(new Paragraph({
+        p.push(new Paragraph({
           alignment: AlignmentType.CENTER,
-          spacing: { after: 20 },
-          children: [new TextRun({ text: b.text, bold: true, size: 36, font: FONT_DOC })],
+          spacing: { after: 30 },
+          children: [new TextRun({ text: b.text, bold: true, size: 32, font: FD })],
         }));
         break;
       case 'subtitle':
-        paras.push(new Paragraph({
+        p.push(new Paragraph({
           alignment: AlignmentType.CENTER,
           spacing: { after: 20 },
-          children: [new TextRun({ text: b.text, size: 22, font: FONT_DOC, color: '444444' })],
+          children: [new TextRun({ text: b.text, size: 20, font: FD })],
         }));
         break;
       case 'contact':
-        paras.push(new Paragraph({
+        p.push(new Paragraph({
           alignment: AlignmentType.CENTER,
-          spacing: { after: 80 },
-          children: [new TextRun({ text: b.text, size: 19, font: FONT_DOC, color: '555555' })],
+          spacing: { after: 60 },
+          border: { bottom: { style: BorderStyle.SINGLE, size: 4, color: 'CCCCCC', space: 4 } },
+          children: [new TextRun({ text: b.text, size: 18, font: FD, color: '555555' })],
         }));
         break;
       case 'header':
-        paras.push(new Paragraph({
-          spacing: { before: prevType === 'bullet' ? 140 : 100, after: 40 },
-          border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: '444444', space: 1 } },
-          children: [new TextRun({ text: b.text, bold: true, size: 21, font: FONT_DOC, characterSpacing: 50 })],
+        p.push(new Paragraph({
+          spacing: { before: prev === 'bullet' || prev === 'text' ? 120 : 80, after: 50 },
+          border: { bottom: { style: BorderStyle.SINGLE, size: 4, color: 'CCCCCC', space: 1 } },
+          children: [new TextRun({ text: b.text, bold: true, size: 20, font: FD, characterSpacing: 40 })],
         }));
         break;
       case 'divider':
         break;
       case 'dateline':
-        paras.push(new Paragraph({
-          spacing: { before: prevType === 'bullet' ? 80 : 40, after: 10 },
-          tabStops: [{ type: TabStopType.RIGHT, position: TAB_RIGHT }],
+        p.push(new Paragraph({
+          spacing: { before: prev === 'bullet' || prev === 'text' ? 80 : 20, after: 10 },
+          tabStops: [{ type: TabStopType.RIGHT, position: TAB_R }],
           children: [
-            new TextRun({ text: b.left || '', bold: true, size: 19, font: FONT_DOC }),
+            new TextRun({ text: b.left || '', bold: true, size: 20, font: FD }),
             new TextRun({ children: [new Tab()] }),
-            new TextRun({ text: b.right || '', size: 18, font: FONT_DOC, color: '666666' }),
+            new TextRun({ text: b.right || '', size: 19, font: FD }),
           ],
         }));
         break;
       case 'bullet':
-        paras.push(new Paragraph({
-          spacing: { after: 15 },
-          indent: { left: 240, hanging: 160 },
-          children: [new TextRun({ text: b.text, size: 19, font: FONT_DOC })],
+        p.push(new Paragraph({
+          spacing: { after: 20 },
+          indent: { left: 340, hanging: 180 },
+          children: [new TextRun({ text: b.text, size: 18, font: FD, color: '333333' })],
         }));
         break;
-      case 'competency-group': {
+      case 'competencies': {
         const items = b.items || [];
         const half = Math.ceil(items.length / 2);
         const rows = Math.max(half, items.length - half);
         for (let r = 0; r < rows; r++) {
-          const left = r < half ? `\u2022 ${items[r]}` : '';
-          const right = (r + half) < items.length ? `\u2022 ${items[r + half]}` : '';
-          paras.push(new Paragraph({
-            spacing: { after: 10 },
+          const left = r < half ? `\u2022  ${items[r]}` : '';
+          const right = (r + half) < items.length ? `\u2022  ${items[r + half]}` : '';
+          p.push(new Paragraph({
+            spacing: { after: 15 },
             tabStops: [{ type: TabStopType.LEFT, position: 4800 }],
             children: [
-              new TextRun({ text: left, size: 19, font: FONT_DOC }),
+              new TextRun({ text: left, size: 18, font: FD, color: '333333' }),
               new TextRun({ children: [new Tab()] }),
-              new TextRun({ text: right, size: 19, font: FONT_DOC }),
+              new TextRun({ text: right, size: 18, font: FD, color: '333333' }),
             ],
           }));
         }
         break;
       }
-      case 'text':
-        paras.push(new Paragraph({
+      case 'certline':
+        p.push(new Paragraph({
           spacing: { after: 15 },
-          children: [new TextRun({ text: b.text, size: 19, font: FONT_DOC })],
+          children: [
+            new TextRun({ text: (b.prefix || '') + ' ', bold: true, size: 18, font: FD, color: '333333' }),
+            new TextRun({ text: b.body || '', size: 18, font: FD, color: '333333' }),
+          ],
         }));
         break;
+      case 'text':
+        if (prev === 'dateline') {
+          // Company/location line
+          p.push(new Paragraph({
+            spacing: { after: 10 },
+            children: [new TextRun({ text: b.text, size: 18, font: FD, color: '555555' })],
+          }));
+        } else {
+          p.push(new Paragraph({
+            spacing: { after: 15 },
+            children: [new TextRun({ text: b.text, size: 19, font: FD, color: '333333' })],
+          }));
+        }
+        break;
       case 'blank':
-        paras.push(new Paragraph({ spacing: { after: 20 } }));
+        p.push(new Paragraph({ spacing: { after: 15 } }));
         break;
     }
-    if (b.type !== 'divider') prevType = b.type;
+    if (b.type !== 'divider') prev = b.type;
   }
 
-  return paras;
+  return p;
 }
 
-function buildCoverLetterDocxParagraphs(text: string): Paragraph[] {
+function buildCoverLetterDocx(text: string): Paragraph[] {
   const lines = text.split('\n');
-  const paras: Paragraph[] = [];
+  const p: Paragraph[] = [];
 
   for (let i = 0; i < lines.length; i++) {
-    const trimmed = lines[i].trim();
-    if (!trimmed) {
-      paras.push(new Paragraph({ spacing: { after: 100 } }));
+    const t = lines[i].trim();
+    if (!t) {
+      p.push(new Paragraph({ spacing: { after: 100 } }));
       continue;
     }
-
-    // Name
-    if (i < 2 && trimmed === trimmed.toUpperCase() && trimmed.length > 3 && !trimmed.includes('|')) {
-      paras.push(new Paragraph({
+    if (i < 2 && t === t.toUpperCase() && t.length > 3 && !t.includes('|')) {
+      p.push(new Paragraph({
         spacing: { after: 20 },
-        children: [new TextRun({ text: trimmed, bold: true, size: 28, font: FONT_DOC })],
+        children: [new TextRun({ text: t, bold: true, size: 28, font: FD })],
       }));
       continue;
     }
-
-    // Contact
-    if (i < 3 && trimmed.includes('|')) {
-      paras.push(new Paragraph({
+    if (i < 3 && t.includes('|')) {
+      p.push(new Paragraph({
         spacing: { after: 60 },
-        children: [new TextRun({ text: trimmed, size: 19, font: FONT_DOC, color: '555555' })],
+        border: { bottom: { style: BorderStyle.SINGLE, size: 4, color: 'CCCCCC', space: 4 } },
+        children: [new TextRun({ text: t, size: 19, font: FD, color: '555555' })],
       }));
       continue;
     }
-
-    paras.push(new Paragraph({
+    p.push(new Paragraph({
       spacing: { after: 50, line: 300 },
-      children: [new TextRun({ text: trimmed, size: 22, font: FONT_DOC })],
+      children: [new TextRun({ text: t, size: 22, font: FD })],
     }));
   }
 
-  return paras;
+  return p;
 }
 
 export async function downloadAsDocx(text: string, filename: string) {
   const isCV = filename.toLowerCase().includes('cv');
-  const children = isCV ? buildCvDocxParagraphs(text) : buildCoverLetterDocxParagraphs(text);
+  const children = isCV ? buildCvDocx(text) : buildCoverLetterDocx(text);
 
   const doc = new DocxDocument({
     sections: [{
