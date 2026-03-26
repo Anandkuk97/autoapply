@@ -201,73 +201,34 @@ const MR = 18;
 const MT = 15;
 const MB = 15;
 const CW = PG_W - ML - MR;
-const MAX_Y = PG_H - MB;
+
+// Target zone: content should end between 255mm and 277mm from top
+const TARGET_MIN_Y = 255;
+const TARGET_MAX_Y = PG_H - MB - 5; // 277mm
 
 interface Sizing {
   nameFont: number;
-  subtitleFont: number;
-  contactFont: number;
   headerFont: number;
-  titleFont: number;
-  dateFont: number;
-  companyFont: number;
   bodyFont: number;
-  bulletFont: number;
-  compFont: number;
-  certFont: number;
-  summaryLH: number;
-  bulletLH: number;
-  compLH: number;
-  certLH: number;
-  betweenBullets: number;
-  betweenRoles: number;
-  beforeHeader: number;
-  afterHeaderLine: number;
+  companyFont: number;
+  lineHeight: number;
+  bulletGap: number;
+  sectionGapBefore: number;
+  afterHeaderLine: number; // ALWAYS 4mm minimum
 }
 
-const NORMAL: Sizing = {
-  nameFont: 14,
-  subtitleFont: 10,
-  contactFont: 9,
-  headerFont: 12,
-  titleFont: 10.5,
-  dateFont: 10,
-  companyFont: 9,
-  bodyFont: 9.5,
-  bulletFont: 9,
-  compFont: 9,
-  certFont: 9,
-  summaryLH: 3.8,
-  bulletLH: 3.7,
-  compLH: 4.4,
-  certLH: 4,
-  betweenBullets: 0.8,
-  betweenRoles: 3.5,
-  beforeHeader: 4.5,
-  afterHeaderLine: 2.5,
-};
-
-const COMPACT: Sizing = {
-  nameFont: 13,
-  subtitleFont: 9.5,
-  contactFont: 8.5,
-  headerFont: 11,
-  titleFont: 10,
-  dateFont: 9.5,
-  companyFont: 8.5,
-  bodyFont: 9,
-  bulletFont: 8.5,
-  compFont: 8.5,
-  certFont: 8.5,
-  summaryLH: 3.5,
-  bulletLH: 3.4,
-  compLH: 4,
-  certLH: 3.7,
-  betweenBullets: 0.5,
-  betweenRoles: 2.8,
-  beforeHeader: 3.5,
-  afterHeaderLine: 2,
-};
+function makeSizing(baseFontSize: number): Sizing {
+  return {
+    nameFont: baseFontSize + 7,
+    headerFont: baseFontSize + 1,
+    bodyFont: baseFontSize,
+    companyFont: baseFontSize - 0.5,
+    lineHeight: baseFontSize * 0.42,
+    bulletGap: baseFontSize * 0.15,
+    sectionGapBefore: baseFontSize * 0.55,
+    afterHeaderLine: 4, // RULE 1: ALWAYS 4mm, never less
+  };
+}
 
 function wrapText(doc: any, text: string, maxWidth: number): string[] {
   const words = text.split(' ');
@@ -286,10 +247,11 @@ function wrapText(doc: any, text: string, maxWidth: number): string[] {
   return lines.length ? lines : [''];
 }
 
-function renderCvPdf(doc: any, blocks: Block[], sz: Sizing, maxBulletsPerRole: number): number {
+function renderCvPdf(doc: any, blocks: Block[], sz: Sizing, maxBulletsPerRole: number): { lastY: number; bulletCount: number } {
   let y = MT;
   let prevType = '';
   let bulletsInRole = 0;
+  let totalBullets = 0;
 
   for (const b of blocks) {
     switch (b.type) {
@@ -307,44 +269,47 @@ function renderCvPdf(doc: any, blocks: Block[], sz: Sizing, maxBulletsPerRole: n
       // ─── SUBTITLE: italic, centered ───
       case 'subtitle': {
         doc.setFont('helvetica', 'oblique');
-        doc.setFontSize(sz.subtitleFont);
+        doc.setFontSize(sz.bodyFont);
         doc.setTextColor(0, 0, 0);
         doc.text(b.text, PG_W / 2, y, { align: 'center' });
-        y += sz.subtitleFont * 0.35 + 1;
+        y += sz.bodyFont * 0.35 + 1;
         break;
       }
 
       // ─── CONTACT: normal, centered, gray + dark line below ───
       case 'contact': {
         doc.setFont('helvetica', 'normal');
-        doc.setFontSize(sz.contactFont);
+        doc.setFontSize(sz.bodyFont - 0.5);
         doc.setTextColor(100, 100, 100);
         doc.text(b.text, PG_W / 2, y, { align: 'center' });
-        y += sz.contactFont * 0.35 + 2.5;
+        y += (sz.bodyFont - 0.5) * 0.35 + 2.5;
         // Full-width dark line (matches reference)
         doc.setDrawColor(0, 0, 0);
         doc.setLineWidth(0.5);
         doc.line(ML, y, PG_W - MR, y);
-        y += 3;
+        y += 3; // gap after contact line to first section
         break;
       }
 
       // ─── SECTION HEADER: bold, with thin elegant line below ───
+      // RULE 1: 4mm gap after EVERY section header underline
+      // RULE 2: 0.2mm thick, #CCCCCC color
       case 'header': {
         // Gap before header
         if (prevType && prevType !== 'contact' && prevType !== 'divider') {
-          y += sz.beforeHeader;
+          y += sz.sectionGapBefore;
         }
         doc.setFont('helvetica', 'bold');
         doc.setFontSize(sz.headerFont);
         doc.setTextColor(0, 0, 0);
         doc.text(b.text, ML, y);
         y += 1.8;
-        // Thin elegant line below header
+        // RULE 2: Thin elegant line — 0.2mm, #CCCCCC
         doc.setDrawColor(204, 204, 204);
         doc.setLineWidth(0.2);
         doc.line(ML, y, PG_W - MR, y);
-        y += 2.5; // 2.5mm gap between line and content
+        // RULE 1: EXACTLY 4mm gap after section line
+        y += sz.afterHeaderLine; // always 4mm
         bulletsInRole = 0;
         break;
       }
@@ -355,19 +320,19 @@ function renderCvPdf(doc: any, blocks: Block[], sz: Sizing, maxBulletsPerRole: n
       // ─── DATELINE: bold title left, date right-aligned ───
       case 'dateline': {
         if (prevType === 'bullet' || prevType === 'text') {
-          y += sz.betweenRoles;
+          y += sz.sectionGapBefore * 0.6;
         }
         bulletsInRole = 0;
 
         doc.setFont('helvetica', 'bold');
-        doc.setFontSize(sz.titleFont);
+        doc.setFontSize(sz.bodyFont + 1);
         doc.setTextColor(0, 0, 0);
         doc.text(b.left || '', ML, y);
         // Date pushed to far right
         doc.setFont('helvetica', 'normal');
-        doc.setFontSize(sz.dateFont);
+        doc.setFontSize(sz.bodyFont);
         doc.text(b.right || '', PG_W - MR, y, { align: 'right' });
-        y += 4;
+        y += sz.lineHeight + 0.5;
         break;
       }
 
@@ -375,9 +340,10 @@ function renderCvPdf(doc: any, blocks: Block[], sz: Sizing, maxBulletsPerRole: n
       case 'bullet': {
         bulletsInRole++;
         if (bulletsInRole > maxBulletsPerRole) break;
+        totalBullets++;
 
         doc.setFont('helvetica', 'normal');
-        doc.setFontSize(sz.bulletFont);
+        doc.setFontSize(sz.bodyFont);
         doc.setTextColor(51, 51, 51);
         const rawText = b.text.replace(/^\u2022\s*/, '');
         const bulletX = ML + 4;
@@ -388,9 +354,9 @@ function renderCvPdf(doc: any, blocks: Block[], sz: Sizing, maxBulletsPerRole: n
         doc.text('\u2022', bulletX, y);
         for (let li = 0; li < bLines.length; li++) {
           doc.text(bLines[li], textX, y);
-          y += sz.bulletLH;
+          y += sz.lineHeight;
         }
-        y += sz.betweenBullets;
+        y += sz.bulletGap;
         break;
       }
 
@@ -402,7 +368,7 @@ function renderCvPdf(doc: any, blocks: Block[], sz: Sizing, maxBulletsPerRole: n
         const col2 = items.slice(third, third * 2);
         const col3 = items.slice(third * 2);
         doc.setFont('helvetica', 'normal');
-        doc.setFontSize(sz.compFont);
+        doc.setFontSize(sz.bodyFont);
         doc.setTextColor(51, 51, 51);
 
         const rows = Math.max(col1.length, col2.length, col3.length);
@@ -414,7 +380,7 @@ function renderCvPdf(doc: any, blocks: Block[], sz: Sizing, maxBulletsPerRole: n
           if (r < col1.length) doc.text(`\u2022  ${col1[r]}`, colStart1, y);
           if (r < col2.length) doc.text(`\u2022  ${col2[r]}`, colStart2, y);
           if (r < col3.length) doc.text(`\u2022  ${col3[r]}`, colStart3, y);
-          y += sz.compLH;
+          y += sz.lineHeight + 0.5;
         }
         break;
       }
@@ -422,7 +388,7 @@ function renderCvPdf(doc: any, blocks: Block[], sz: Sizing, maxBulletsPerRole: n
       // ─── CERTLINE: bold prefix + normal body ───
       case 'certline': {
         doc.setFont('helvetica', 'bold');
-        doc.setFontSize(sz.certFont);
+        doc.setFontSize(sz.bodyFont);
         doc.setTextColor(0, 0, 0);
         const pw = doc.getTextWidth((b.prefix || '') + ' ');
         doc.text((b.prefix || '') + ' ', ML, y);
@@ -431,10 +397,10 @@ function renderCvPdf(doc: any, blocks: Block[], sz: Sizing, maxBulletsPerRole: n
         const bodyMaxW = CW - pw;
         const cLines = wrapText(doc, b.body || '', bodyMaxW);
         doc.text(cLines[0], ML + pw, y);
-        y += sz.certLH;
+        y += sz.lineHeight;
         for (let li = 1; li < cLines.length; li++) {
           doc.text(cLines[li], ML + pw, y);
-          y += sz.certLH;
+          y += sz.lineHeight;
         }
         break;
       }
@@ -447,7 +413,7 @@ function renderCvPdf(doc: any, blocks: Block[], sz: Sizing, maxBulletsPerRole: n
           doc.setFontSize(sz.companyFont);
           doc.setTextColor(100, 100, 100);
           doc.text(b.text, ML, y);
-          y += 3.5;
+          y += sz.lineHeight + 0.5;
         } else {
           doc.setFont('helvetica', 'normal');
           doc.setFontSize(sz.bodyFont);
@@ -455,7 +421,7 @@ function renderCvPdf(doc: any, blocks: Block[], sz: Sizing, maxBulletsPerRole: n
           const tLines = wrapText(doc, b.text, CW);
           for (const tl of tLines) {
             doc.text(tl, ML, y);
-            y += sz.summaryLH;
+            y += sz.lineHeight;
           }
         }
         break;
@@ -469,83 +435,81 @@ function renderCvPdf(doc: any, blocks: Block[], sz: Sizing, maxBulletsPerRole: n
     if (b.type !== 'divider') prevType = b.type;
   }
 
-  return y;
-}
-
-// Create a sizing variant with scaled body/bullet fonts and proportional line heights
-function scaleSizing(base: Sizing, bodyFontPt: number): Sizing {
-  const ratio = bodyFontPt / base.bodyFont;
-  return {
-    ...base,
-    bodyFont: bodyFontPt,
-    bulletFont: base.bulletFont * ratio,
-    compFont: base.compFont * ratio,
-    certFont: base.certFont * ratio,
-    companyFont: base.companyFont * ratio,
-    summaryLH: base.summaryLH * ratio,
-    bulletLH: base.bulletLH * ratio,
-    compLH: base.compLH * ratio,
-    certLH: base.certLH * ratio,
-    betweenBullets: base.betweenBullets * ratio,
-    betweenRoles: base.betweenRoles * ratio,
-    beforeHeader: base.beforeHeader * ratio,
-    // Keep afterHeaderLine fixed at 2.5mm (the gap we set)
-    afterHeaderLine: 2.5,
-  };
+  return { lastY: y, bulletCount: totalBullets };
 }
 
 // Dry-run measurement on a throwaway doc
-function measureCv(jsPDFClass: any, blocks: Block[], sz: Sizing, maxB: number): number {
+function measureCv(jsPDFClass: any, blocks: Block[], sz: Sizing, maxB: number): { lastY: number; bulletCount: number } {
   const tmp = new jsPDFClass({ unit: 'mm', format: 'a4', orientation: 'portrait' });
   return renderCvPdf(tmp, blocks, sz, maxB);
 }
 
-// Target: fill page with 15-20mm bottom margin (MAX_Y = 282, so content should end between 262-277)
-const IDEAL_MIN_Y = MAX_Y - 20; // 262mm — if content ends before this, scale up
-const IDEAL_MAX_Y = MAX_Y;      // 282mm — must not exceed this
-
 function buildCvPdf(doc: any, text: string, jsPDFClass: any) {
   const blocks = parseBlocks(text);
 
-  // Step 1: Try increasing font sizes to fill the page (9.5 → 10 → 10.5 → 11)
-  const upSizes = [9.5, 10, 10.5, 11];
-  let bestSz: Sizing = NORMAL;
-  let bestBullets = 6;
-  let bestY = 0;
+  // RULE 3: Dynamic font sizing to fill the entire page
+  // Start at 9.5pt, increase by 0.3 until content fills 255-277mm range
+  let baseFontSize = 9.5;
+  let rendered = false;
+  let iterations = 0;
+  const maxIterations = 5;
+  let finalResult = { lastY: 0, bulletCount: 0 };
 
-  for (const fs of upSizes) {
-    const sz = scaleSizing(NORMAL, fs);
-    const y = measureCv(jsPDFClass, blocks, sz, 6);
-    if (y <= IDEAL_MAX_Y) {
-      bestSz = sz;
-      bestBullets = 6;
-      bestY = y;
-    } else {
-      break; // overflows, stop scaling up
-    }
-  }
+  while (!rendered && iterations < maxIterations) {
+    iterations++;
+    const sz = makeSizing(baseFontSize);
+    const result = measureCv(jsPDFClass, blocks, sz, 6);
 
-  // If best fit has too much space AND we haven't maxed fonts, we already picked the largest that fits
-  // If the normal 9.5pt already overflows, scale down
-  if (bestY === 0) {
-    // Even 9.5pt overflows with 6 bullets — try reducing bullets
-    const sz95 = scaleSizing(NORMAL, 9.5);
-    let y = measureCv(jsPDFClass, blocks, sz95, 5);
-    if (y <= IDEAL_MAX_Y) {
-      bestSz = sz95; bestBullets = 5; bestY = y;
-    } else {
-      // Try compact
-      y = measureCv(jsPDFClass, blocks, COMPACT, 5);
-      if (y <= IDEAL_MAX_Y) {
-        bestSz = COMPACT; bestBullets = 5; bestY = y;
-      } else {
-        bestSz = COMPACT; bestBullets = 4; bestY = measureCv(jsPDFClass, blocks, COMPACT, 4);
+    // RULE 4: Log verification values
+    console.log(`[CV PDF] Iteration ${iterations}: baseFontSize=${baseFontSize.toFixed(1)}, lastY=${result.lastY.toFixed(1)}mm, bullets=${result.bulletCount}`);
+
+    if (result.lastY > TARGET_MAX_Y) {
+      // Overflow — decrease font size
+      baseFontSize -= 0.3;
+      if (baseFontSize < 8) {
+        // Emergency: render at minimum size
+        console.warn('[CV PDF] Emergency: font size too small, rendering at 8pt');
+        baseFontSize = 8;
+        rendered = true;
+        finalResult = result;
       }
+    } else if (result.lastY < TARGET_MIN_Y) {
+      // Too much blank space — increase font size
+      baseFontSize += 0.3;
+      finalResult = result;
+      // If we've hit the max font and still have space, that's OK — use it
+      if (baseFontSize > 12) {
+        baseFontSize = 12;
+        rendered = true;
+      }
+    } else {
+      // Perfect: lastY is between 255mm and 277mm
+      rendered = true;
+      finalResult = result;
     }
   }
 
-  // Render with the best sizing
-  renderCvPdf(doc, blocks, bestSz, bestBullets);
+  // If loop ended without converging, use last measured size
+  if (!rendered) {
+    console.log(`[CV PDF] Did not converge after ${maxIterations} iterations, using baseFontSize=${baseFontSize.toFixed(1)}`);
+  }
+
+  // Final render on the real document
+  const finalSz = makeSizing(baseFontSize);
+  const result = renderCvPdf(doc, blocks, finalSz, 6);
+
+  // RULE 4: Final verification logging
+  const remainingSpace = PG_H - MB - result.lastY;
+  console.log(`[CV PDF] === FINAL VERIFICATION ===`);
+  console.log(`[CV PDF] Last content Y position: ${result.lastY.toFixed(1)}mm`);
+  console.log(`[CV PDF] Page height: 297mm, Bottom margin: ${MB}mm`);
+  console.log(`[CV PDF] Remaining blank space: ${remainingSpace.toFixed(1)}mm`);
+  console.log(`[CV PDF] Final base font size: ${baseFontSize.toFixed(1)}pt`);
+  console.log(`[CV PDF] Total bullets rendered: ${result.bulletCount}`);
+
+  if (remainingSpace > 25) {
+    console.warn(`[CV PDF] WARNING: ${remainingSpace.toFixed(1)}mm blank space remaining (>25mm). PDF may not fill the page optimally.`);
+  }
 }
 
 
@@ -606,7 +570,7 @@ function buildCoverLetterPdf(doc: any, text: string) {
     doc.setTextColor(51, 51, 51);
     const pLines = wrapText(doc, trimmed, CW);
     for (const pl of pLines) {
-      if (y > MAX_Y) { doc.addPage(); y = MT; }
+      if (y > PG_H - MB) { doc.addPage(); y = MT; }
       doc.text(pl, ML, y);
       y += 4.8;
     }
