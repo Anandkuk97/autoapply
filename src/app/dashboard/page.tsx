@@ -507,16 +507,20 @@ function FormattedCV({ text }: { text: string }) {
 
   const flushCompetencies = () => {
     if (competencyBullets.length > 0) {
-      const half = Math.ceil(competencyBullets.length / 2);
-      const col1 = competencyBullets.slice(0, half);
-      const col2 = competencyBullets.slice(half);
+      const third = Math.ceil(competencyBullets.length / 3);
+      const col1 = competencyBullets.slice(0, third);
+      const col2 = competencyBullets.slice(third, third * 2);
+      const col3 = competencyBullets.slice(third * 2);
       elements.push(
-        <div key={`comp-${elements.length}`} className="grid grid-cols-2 gap-x-4 gap-y-0.5 mt-1.5 mb-1">
+        <div key={`comp-${elements.length}`} className="grid grid-cols-3 gap-x-3 gap-y-0.5 mt-1.5 mb-1">
           {col1.map((c, j) => (
-            <div key={`c1-${j}`} className="text-gray-800 text-[11px] leading-relaxed">{'\u2022'} {c}</div>
+            <div key={`c1-${j}`} className="text-gray-800 text-[10px] leading-relaxed">{'\u2022'} {c}</div>
           ))}
           {col2.map((c, j) => (
-            <div key={`c2-${j}`} className="text-gray-800 text-[11px] leading-relaxed">{'\u2022'} {c}</div>
+            <div key={`c2-${j}`} className="text-gray-800 text-[10px] leading-relaxed">{'\u2022'} {c}</div>
+          ))}
+          {col3.map((c, j) => (
+            <div key={`c3-${j}`} className="text-gray-800 text-[10px] leading-relaxed">{'\u2022'} {c}</div>
           ))}
         </div>
       );
@@ -566,7 +570,7 @@ function FormattedCV({ text }: { text: string }) {
       if (trimmed.includes('|')) {
         const isContact = trimmed.includes('@') || /\d{5,}/.test(trimmed.replace(/[\s\-+()]/g, ''));
         elements.push(
-          <div key={key} className={`text-center text-[10px] leading-relaxed ${isContact ? 'text-gray-500 mb-2' : 'text-gray-600 mb-0'}`}>
+          <div key={key} className={`text-center text-[10px] leading-relaxed ${isContact ? 'text-gray-500 mb-2 pb-2 border-b border-gray-800' : 'text-gray-600 italic mb-0'}`}>
             {trimmed}
           </div>
         );

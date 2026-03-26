@@ -30,8 +30,8 @@ const SECTION_HEADERS = [
 const DIVIDER_RE = /^[━─\-=]{5,}$/;
 const DATE_RANGE_RE = /(\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{4}\s*-\s*(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{4}\b|\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{4}\s*-\s*Present\b)/i;
 const SINGLE_DATE_RE = /(\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{4})\s*$/i;
-
-// Detect "Certifications:" or "Tools:" or "Methods:" prefix
+// Also match "YYYY - YYYY" for projects like "2021 - 2024"
+const YEAR_RANGE_RE = /(\b\d{4}\s*-\s*\d{4})\s*$/;
 const CERT_PREFIX_RE = /^(Certifications|Tools|Methods)\s*:\s*/i;
 
 interface Block {
@@ -102,8 +102,8 @@ function parseBlocks(text: string): Block[] {
       continue;
     }
 
-    // Certifications & Technical Skills — lines with "Prefix: value"
-    if ((section === 'CERTIFICATIONS & TECHNICAL SKILLS' || section === 'CERTIFICATIONS' || section === 'TECHNICAL SKILLS')) {
+    // Certifications lines with "Prefix: value"
+    if (section === 'CERTIFICATIONS & TECHNICAL SKILLS' || section === 'CERTIFICATIONS' || section === 'TECHNICAL SKILLS') {
       const pm = t.match(CERT_PREFIX_RE);
       if (pm) {
         flushComp();
@@ -112,7 +112,7 @@ function parseBlocks(text: string): Block[] {
       }
     }
 
-    // Date range (experience / project)
+    // Date range (experience / project) e.g. "Jun 2020 - Sep 2025"
     const drm = t.match(DATE_RANGE_RE);
     if (drm) {
       flushComp();
@@ -121,7 +121,19 @@ function parseBlocks(text: string): Block[] {
       continue;
     }
 
-    // Single date (education / project)
+    // Year range for projects e.g. "2021 - 2024"
+    if (section === 'SELECTED PROJECT' || section.startsWith('SELECTED')) {
+      const yrm = t.match(YEAR_RANGE_RE);
+      if (yrm && !t.startsWith('\u2022')) {
+        const left = t.slice(0, t.indexOf(yrm[1])).trim();
+        if (left.length > 3) {
+          blocks.push({ type: 'dateline', text: t, left, right: yrm[1].trim() });
+          continue;
+        }
+      }
+    }
+
+    // Single date (education) e.g. "Sep 2026"
     if (section === 'EDUCATION' || section.startsWith('EDUCATION') ||
         section === 'SELECTED PROJECT' || section.startsWith('SELECTED')) {
       const sdm = t.match(SINGLE_DATE_RE);
@@ -151,61 +163,93 @@ function parseBlocks(text: string): Block[] {
 
 
 // ══════════════════════════════════════════════════════════
-//  CV PDF — jsPDF with exact measurements
+//  CV PDF — Exact match to Anand_Kumar_Ops_.pdf reference
 // ══════════════════════════════════════════════════════════
+//
+//  Reference layout (from the uploaded PDF):
+//  - Name: ~14pt bold, centered, black
+//  - Subtitle: ~10pt italic, centered
+//  - Contact: ~9pt normal, centered, gray
+//  - Full-width dark line (1pt, black) after contact
+//  - Section headers: ~12pt bold, with thick dark line below
+//  - Competencies: 3 COLUMNS, 4 rows each
+//  - Company lines: italic, gray
+//  - Bullets: small bullet char, indented
+//  - Cert lines: bold prefix, normal body
 
 const PG_W = 210;
 const PG_H = 297;
-const ML = 18;   // left margin
-const MR = 18;   // right margin
-const MT = 15;   // top margin (reduced from 20 for more content space)
-const MB = 20;   // bottom margin
-const CW = PG_W - ML - MR; // content width
-const MAX_Y = PG_H - MB;   // 277mm
+const ML = 18;
+const MR = 18;
+const MT = 15;
+const MB = 15;
+const CW = PG_W - ML - MR;
+const MAX_Y = PG_H - MB;
 
 interface Sizing {
-  bodyFont: number;       // normal body font pt
-  bulletFont: number;     // bullet font pt
-  compFont: number;       // competency font pt
-  summaryLH: number;      // summary line height mm
-  bulletLH: number;       // bullet line height mm
-  compLH: number;         // competency row height mm
-  certLH: number;         // cert line height mm
-  betweenBullets: number; // extra gap between bullets mm
-  betweenRoles: number;   // gap between experience roles mm
-  beforeHeader: number;   // gap before section header mm
-  afterHeaderLine: number; // gap after header underline mm
-  eduGap: number;         // gap between education entries mm
+  nameFont: number;
+  subtitleFont: number;
+  contactFont: number;
+  headerFont: number;
+  titleFont: number;
+  dateFont: number;
+  companyFont: number;
+  bodyFont: number;
+  bulletFont: number;
+  compFont: number;
+  certFont: number;
+  summaryLH: number;
+  bulletLH: number;
+  compLH: number;
+  certLH: number;
+  betweenBullets: number;
+  betweenRoles: number;
+  beforeHeader: number;
+  afterHeaderLine: number;
 }
 
 const NORMAL: Sizing = {
+  nameFont: 14,
+  subtitleFont: 10,
+  contactFont: 9,
+  headerFont: 12,
+  titleFont: 10.5,
+  dateFont: 10,
+  companyFont: 9,
   bodyFont: 9.5,
   bulletFont: 9,
   compFont: 9,
+  certFont: 9,
   summaryLH: 3.8,
-  bulletLH: 3.6,
-  compLH: 4.2,
-  certLH: 3.8,
-  betweenBullets: 1.2,
-  betweenRoles: 4,
-  beforeHeader: 5,
-  afterHeaderLine: 3,
-  eduGap: 3,
+  bulletLH: 3.7,
+  compLH: 4.4,
+  certLH: 4,
+  betweenBullets: 0.8,
+  betweenRoles: 3.5,
+  beforeHeader: 4.5,
+  afterHeaderLine: 2.5,
 };
 
 const COMPACT: Sizing = {
+  nameFont: 13,
+  subtitleFont: 9.5,
+  contactFont: 8.5,
+  headerFont: 11,
+  titleFont: 10,
+  dateFont: 9.5,
+  companyFont: 8.5,
   bodyFont: 9,
   bulletFont: 8.5,
   compFont: 8.5,
+  certFont: 8.5,
   summaryLH: 3.5,
-  bulletLH: 3.3,
-  compLH: 3.9,
-  certLH: 3.5,
-  betweenBullets: 0.9,
-  betweenRoles: 3,
-  beforeHeader: 4,
-  afterHeaderLine: 2.5,
-  eduGap: 2.5,
+  bulletLH: 3.4,
+  compLH: 4,
+  certLH: 3.7,
+  betweenBullets: 0.5,
+  betweenRoles: 2.8,
+  beforeHeader: 3.5,
+  afterHeaderLine: 2,
 };
 
 function wrapText(doc: any, text: string, maxWidth: number): string[] {
@@ -228,80 +272,83 @@ function wrapText(doc: any, text: string, maxWidth: number): string[] {
 function renderCvPdf(doc: any, blocks: Block[], sz: Sizing, maxBulletsPerRole: number): number {
   let y = MT;
   let prevType = '';
-  let bulletsInCurrentRole = 0;
+  let bulletsInRole = 0;
 
-  for (let bi = 0; bi < blocks.length; bi++) {
-    const b = blocks[bi];
-
+  for (const b of blocks) {
     switch (b.type) {
-      // ─── NAME ───
+
+      // ─── NAME: bold, centered ───
       case 'name': {
         doc.setFont('helvetica', 'bold');
-        doc.setFontSize(16);
+        doc.setFontSize(sz.nameFont);
         doc.setTextColor(0, 0, 0);
         doc.text(b.text, PG_W / 2, y, { align: 'center' });
-        y += 5.5 + 2; // ~16pt descent + 2mm gap
+        y += sz.nameFont * 0.35 + 1.5;
         break;
       }
 
-      // ─── SUBTITLE ───
+      // ─── SUBTITLE: italic, centered ───
       case 'subtitle': {
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(10);
+        doc.setFont('helvetica', 'oblique');
+        doc.setFontSize(sz.subtitleFont);
         doc.setTextColor(0, 0, 0);
         doc.text(b.text, PG_W / 2, y, { align: 'center' });
-        y += 3.5 + 1.5; // 10pt descent + 1.5mm gap
+        y += sz.subtitleFont * 0.35 + 1;
         break;
       }
 
-      // ─── CONTACT ───
+      // ─── CONTACT: normal, centered, gray + dark line below ───
       case 'contact': {
         doc.setFont('helvetica', 'normal');
-        doc.setFontSize(9);
-        doc.setTextColor(85, 85, 85);
+        doc.setFontSize(sz.contactFont);
+        doc.setTextColor(100, 100, 100);
         doc.text(b.text, PG_W / 2, y, { align: 'center' });
-        y += 3 + 3; // 9pt descent + 3mm gap to first section header
+        y += sz.contactFont * 0.35 + 2.5;
+        // Full-width dark line (matches reference)
+        doc.setDrawColor(0, 0, 0);
+        doc.setLineWidth(0.5);
+        doc.line(ML, y, PG_W - MR, y);
+        y += 3;
         break;
       }
 
-      // ─── SECTION HEADER ───
+      // ─── SECTION HEADER: bold, with thick dark line below ───
       case 'header': {
+        // Gap before header
         if (prevType && prevType !== 'contact' && prevType !== 'divider') {
           y += sz.beforeHeader;
         }
         doc.setFont('helvetica', 'bold');
-        doc.setFontSize(10);
+        doc.setFontSize(sz.headerFont);
         doc.setTextColor(0, 0, 0);
         doc.text(b.text, ML, y);
-        y += 1.5;
-        doc.setDrawColor(204, 204, 204);
-        doc.setLineWidth(0.1);
+        y += 1.8;
+        // Thick dark line below header (matching reference)
+        doc.setDrawColor(0, 0, 0);
+        doc.setLineWidth(0.5);
         doc.line(ML, y, PG_W - MR, y);
         y += sz.afterHeaderLine;
-        bulletsInCurrentRole = 0;
+        bulletsInRole = 0;
         break;
       }
 
-      // ─── DIVIDER ───
       case 'divider':
-        break; // skip, header draws its own line
+        break;
 
-      // ─── DATELINE (title left, date right) ───
+      // ─── DATELINE: bold title left, date right-aligned ───
       case 'dateline': {
         if (prevType === 'bullet' || prevType === 'text') {
           y += sz.betweenRoles;
         }
-        // Always reset bullet counter for each new dateline (new role/entry)
-        bulletsInCurrentRole = 0;
-        // Title — bold left
+        bulletsInRole = 0;
+
         doc.setFont('helvetica', 'bold');
-        doc.setFontSize(10);
+        doc.setFontSize(sz.titleFont);
         doc.setTextColor(0, 0, 0);
         doc.text(b.left || '', ML, y);
-        // Date — normal right-aligned (pushed to far right edge)
+        // Date pushed to far right
         doc.setFont('helvetica', 'normal');
-        doc.setFontSize(9.5);
-        doc.setTextColor(0, 0, 0);
+        doc.setFontSize(sz.dateFont);
         doc.text(b.right || '', PG_W - MR, y, { align: 'right' });
         y += 4;
         break;
@@ -309,23 +356,18 @@ function renderCvPdf(doc: any, blocks: Block[], sz: Sizing, maxBulletsPerRole: n
 
       // ─── BULLET ───
       case 'bullet': {
-        bulletsInCurrentRole++;
-        if (bulletsInCurrentRole > maxBulletsPerRole) {
-          console.log(`[PDF] Skipping bullet #${bulletsInCurrentRole} (max ${maxBulletsPerRole}):`, b.text.slice(0, 50));
-          break;
-        }
-        console.log(`[PDF] Rendering bullet #${bulletsInCurrentRole}:`, b.text.slice(0, 60));
+        bulletsInRole++;
+        if (bulletsInRole > maxBulletsPerRole) break;
 
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(sz.bulletFont);
         doc.setTextColor(51, 51, 51);
         const rawText = b.text.replace(/^\u2022\s*/, '');
-        const bulletX = ML + 5;  // bullet char at 5mm indent
-        const textX = ML + 9;    // text at 9mm (hanging indent)
-        const textMaxW = CW - 9;
+        const bulletX = ML + 4;
+        const textX = ML + 8;
+        const textMaxW = CW - 8;
         const bLines = wrapText(doc, rawText, textMaxW);
 
-        // Bullet character on first line
         doc.text('\u2022', bulletX, y);
         for (let li = 0; li < bLines.length; li++) {
           doc.text(bLines[li], textX, y);
@@ -335,53 +377,58 @@ function renderCvPdf(doc: any, blocks: Block[], sz: Sizing, maxBulletsPerRole: n
         break;
       }
 
-      // ─── COMPETENCIES (2-column) ───
+      // ─── COMPETENCIES: 3 COLUMNS (matching reference) ───
       case 'competencies': {
         const items = b.items || [];
-        const half = Math.ceil(items.length / 2);
-        const col1 = items.slice(0, half);
-        const col2 = items.slice(half);
+        const third = Math.ceil(items.length / 3);
+        const col1 = items.slice(0, third);
+        const col2 = items.slice(third, third * 2);
+        const col3 = items.slice(third * 2);
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(sz.compFont);
         doc.setTextColor(51, 51, 51);
 
-        const rows = Math.max(col1.length, col2.length);
-        const colMid = 105; // page center for right column
+        const rows = Math.max(col1.length, col2.length, col3.length);
+        const colStart1 = ML + 2;
+        const colStart2 = ML + CW / 3 + 2;
+        const colStart3 = ML + (CW * 2) / 3 + 2;
+
         for (let r = 0; r < rows; r++) {
-          if (r < col1.length) doc.text(`\u2022  ${col1[r]}`, ML + 2, y);
-          if (r < col2.length) doc.text(`\u2022  ${col2[r]}`, colMid, y);
+          if (r < col1.length) doc.text(`\u2022  ${col1[r]}`, colStart1, y);
+          if (r < col2.length) doc.text(`\u2022  ${col2[r]}`, colStart2, y);
+          if (r < col3.length) doc.text(`\u2022  ${col3[r]}`, colStart3, y);
           y += sz.compLH;
         }
         break;
       }
 
-      // ─── CERTLINE (prefix bold, body normal) ───
+      // ─── CERTLINE: bold prefix + normal body ───
       case 'certline': {
         doc.setFont('helvetica', 'bold');
-        doc.setFontSize(sz.bodyFont);
-        doc.setTextColor(51, 51, 51);
-        const prefixW = doc.getTextWidth(b.prefix + ' ');
-        doc.text(b.prefix + ' ', ML, y);
+        doc.setFontSize(sz.certFont);
+        doc.setTextColor(0, 0, 0);
+        const pw = doc.getTextWidth((b.prefix || '') + ' ');
+        doc.text((b.prefix || '') + ' ', ML, y);
         doc.setFont('helvetica', 'normal');
-        // Wrap body after prefix
-        const bodyMaxW = CW - prefixW;
+        doc.setTextColor(51, 51, 51);
+        const bodyMaxW = CW - pw;
         const cLines = wrapText(doc, b.body || '', bodyMaxW);
-        doc.text(cLines[0], ML + prefixW, y);
+        doc.text(cLines[0], ML + pw, y);
         y += sz.certLH;
         for (let li = 1; li < cLines.length; li++) {
-          doc.text(cLines[li], ML + prefixW, y);
+          doc.text(cLines[li], ML + pw, y);
           y += sz.certLH;
         }
         break;
       }
 
-      // ─── TEXT (company line, summary paragraph, etc.) ───
+      // ─── TEXT: company line (italic after dateline) or normal ───
       case 'text': {
-        // If immediately after a dateline, this is likely company/location line
         if (prevType === 'dateline') {
-          doc.setFont('helvetica', 'normal');
-          doc.setFontSize(9);
-          doc.setTextColor(85, 85, 85);
+          // Company/location line — italic, gray (matches reference)
+          doc.setFont('helvetica', 'oblique');
+          doc.setFontSize(sz.companyFont);
+          doc.setTextColor(100, 100, 100);
           doc.text(b.text, ML, y);
           y += 3.5;
         } else {
@@ -397,9 +444,8 @@ function renderCvPdf(doc: any, blocks: Block[], sz: Sizing, maxBulletsPerRole: n
         break;
       }
 
-      // ─── BLANK ───
       case 'blank':
-        y += 1;
+        y += 0.5;
         break;
     }
 
@@ -409,41 +455,25 @@ function renderCvPdf(doc: any, blocks: Block[], sz: Sizing, maxBulletsPerRole: n
   return y;
 }
 
-// Dry-run: measure final Y without actually drawing
-function measureCvPdf(jsPDFClass: any, blocks: Block[], sz: Sizing, maxBullets: number): number {
-  // Create a throwaway doc just for text width measurements
+// Dry-run measurement on a throwaway doc
+function measureCv(jsPDFClass: any, blocks: Block[], sz: Sizing, maxB: number): number {
   const tmp = new jsPDFClass({ unit: 'mm', format: 'a4', orientation: 'portrait' });
-  return renderCvPdf(tmp, blocks, sz, maxBullets);
+  return renderCvPdf(tmp, blocks, sz, maxB);
 }
 
-// Exported for use — receives the jsPDF constructor
 function buildCvPdf(doc: any, text: string, jsPDFClass: any) {
   const blocks = parseBlocks(text);
-  console.log(`[PDF] Total blocks parsed: ${blocks.length}`);
-  console.log(`[PDF] Block types:`, blocks.map(b => b.type).join(', '));
 
-  // Measure with normal sizing
-  let finalY = measureCvPdf(jsPDFClass, blocks, NORMAL, 5);
-  console.log(`[PDF] Normal sizing final Y: ${finalY.toFixed(1)}mm (max: ${MAX_Y}mm)`);
+  // Try normal → compact → compact+4bullets
+  let finalY = measureCv(jsPDFClass, blocks, NORMAL, 6);
+  if (finalY <= MAX_Y) { renderCvPdf(doc, blocks, NORMAL, 6); return; }
 
-  if (finalY <= MAX_Y) {
-    // Fits — render once on the real doc
-    renderCvPdf(doc, blocks, NORMAL, 5);
-    return;
-  }
+  finalY = measureCv(jsPDFClass, blocks, NORMAL, 5);
+  if (finalY <= MAX_Y) { renderCvPdf(doc, blocks, NORMAL, 5); return; }
 
-  // Try compact sizing
-  finalY = measureCvPdf(jsPDFClass, blocks, COMPACT, 5);
-  console.log(`[PDF] Compact sizing final Y: ${finalY.toFixed(1)}mm`);
+  finalY = measureCv(jsPDFClass, blocks, COMPACT, 5);
+  if (finalY <= MAX_Y) { renderCvPdf(doc, blocks, COMPACT, 5); return; }
 
-  if (finalY <= MAX_Y) {
-    renderCvPdf(doc, blocks, COMPACT, 5);
-    return;
-  }
-
-  // Try compact with max 4 bullets
-  finalY = measureCvPdf(jsPDFClass, blocks, COMPACT, 4);
-  console.log(`[PDF] Compact+4bullets final Y: ${finalY.toFixed(1)}mm`);
   renderCvPdf(doc, blocks, COMPACT, 4);
 }
 
@@ -460,13 +490,9 @@ function buildCoverLetterPdf(doc: any, text: string) {
   for (const line of lines) {
     const trimmed = line.trim();
 
-    if (!trimmed) {
-      y += 4;
-      lineIdx++;
-      continue;
-    }
+    if (!trimmed) { y += 4; lineIdx++; continue; }
 
-    // Name (ALL CAPS at top)
+    // Name
     if (lineIdx < 2 && trimmed === trimmed.toUpperCase() && trimmed.length > 3 && !trimmed.includes('|')) {
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(14);
@@ -477,16 +503,15 @@ function buildCoverLetterPdf(doc: any, text: string) {
       continue;
     }
 
-    // Contact line
+    // Contact
     if (lineIdx < 3 && trimmed.includes('|')) {
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(9.5);
-      doc.setTextColor(85, 85, 85);
+      doc.setTextColor(100, 100, 100);
       doc.text(trimmed, ML, y);
-      y += 4.5;
-      // Thin line after contact
-      doc.setDrawColor(204, 204, 204);
-      doc.setLineWidth(0.1);
+      y += 4;
+      doc.setDrawColor(0, 0, 0);
+      doc.setLineWidth(0.5);
       doc.line(ML, y, PG_W - MR, y);
       y += 5;
       lineIdx++;
@@ -504,16 +529,13 @@ function buildCoverLetterPdf(doc: any, text: string) {
       continue;
     }
 
-    // Body text — wrap
+    // Body
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(11);
     doc.setTextColor(51, 51, 51);
     const pLines = wrapText(doc, trimmed, CW);
     for (const pl of pLines) {
-      if (y > MAX_Y) {
-        doc.addPage();
-        y = MT;
-      }
+      if (y > MAX_Y) { doc.addPage(); y = MT; }
       doc.text(pl, ML, y);
       y += 4.8;
     }
@@ -543,7 +565,7 @@ export async function downloadAsPdf(text: string, filename: string) {
 
 
 // ══════════════════════════════════════════════════════════
-//  DOCX — matching professional layout
+//  DOCX — matching reference layout
 // ══════════════════════════════════════════════════════════
 
 const FD = 'Calibri';
@@ -559,66 +581,76 @@ function buildCvDocx(text: string): Paragraph[] {
       case 'name':
         p.push(new Paragraph({
           alignment: AlignmentType.CENTER,
-          spacing: { after: 30 },
-          children: [new TextRun({ text: b.text, bold: true, size: 32, font: FD })],
+          spacing: { after: 20 },
+          children: [new TextRun({ text: b.text, bold: true, size: 28, font: FD })],
         }));
         break;
       case 'subtitle':
         p.push(new Paragraph({
           alignment: AlignmentType.CENTER,
-          spacing: { after: 20 },
-          children: [new TextRun({ text: b.text, size: 20, font: FD })],
+          spacing: { after: 15 },
+          children: [new TextRun({ text: b.text, italics: true, size: 20, font: FD })],
         }));
         break;
       case 'contact':
         p.push(new Paragraph({
           alignment: AlignmentType.CENTER,
-          spacing: { after: 60 },
-          border: { bottom: { style: BorderStyle.SINGLE, size: 4, color: 'CCCCCC', space: 4 } },
-          children: [new TextRun({ text: b.text, size: 18, font: FD, color: '555555' })],
+          spacing: { after: 40 },
+          border: { bottom: { style: BorderStyle.SINGLE, size: 12, color: '000000', space: 4 } },
+          children: [new TextRun({ text: b.text, size: 18, font: FD, color: '666666' })],
         }));
         break;
       case 'header':
         p.push(new Paragraph({
-          spacing: { before: prev === 'bullet' || prev === 'text' ? 120 : 80, after: 50 },
-          border: { bottom: { style: BorderStyle.SINGLE, size: 4, color: 'CCCCCC', space: 1 } },
-          children: [new TextRun({ text: b.text, bold: true, size: 20, font: FD, characterSpacing: 40 })],
+          spacing: { before: prev === 'bullet' || prev === 'text' ? 100 : 60, after: 40 },
+          border: { bottom: { style: BorderStyle.SINGLE, size: 12, color: '000000', space: 1 } },
+          children: [new TextRun({ text: b.text, bold: true, size: 24, font: FD })],
         }));
         break;
       case 'divider':
         break;
       case 'dateline':
         p.push(new Paragraph({
-          spacing: { before: prev === 'bullet' || prev === 'text' ? 80 : 20, after: 10 },
+          spacing: { before: prev === 'bullet' || prev === 'text' ? 70 : 15, after: 8 },
           tabStops: [{ type: TabStopType.RIGHT, position: TAB_R }],
           children: [
-            new TextRun({ text: b.left || '', bold: true, size: 20, font: FD }),
+            new TextRun({ text: b.left || '', bold: true, size: 21, font: FD }),
             new TextRun({ children: [new Tab()] }),
-            new TextRun({ text: b.right || '', size: 19, font: FD }),
+            new TextRun({ text: b.right || '', size: 20, font: FD }),
           ],
         }));
         break;
       case 'bullet':
         p.push(new Paragraph({
-          spacing: { after: 20 },
-          indent: { left: 340, hanging: 180 },
+          spacing: { after: 15 },
+          indent: { left: 300, hanging: 160 },
           children: [new TextRun({ text: b.text, size: 18, font: FD, color: '333333' })],
         }));
         break;
       case 'competencies': {
+        // 3-column layout via two tab stops
         const items = b.items || [];
-        const half = Math.ceil(items.length / 2);
-        const rows = Math.max(half, items.length - half);
+        const third = Math.ceil(items.length / 3);
+        const col1 = items.slice(0, third);
+        const col2 = items.slice(third, third * 2);
+        const col3 = items.slice(third * 2);
+        const rows = Math.max(col1.length, col2.length, col3.length);
         for (let r = 0; r < rows; r++) {
-          const left = r < half ? `\u2022  ${items[r]}` : '';
-          const right = (r + half) < items.length ? `\u2022  ${items[r + half]}` : '';
+          const c1 = r < col1.length ? `\u2022  ${col1[r]}` : '';
+          const c2 = r < col2.length ? `\u2022  ${col2[r]}` : '';
+          const c3 = r < col3.length ? `\u2022  ${col3[r]}` : '';
           p.push(new Paragraph({
-            spacing: { after: 15 },
-            tabStops: [{ type: TabStopType.LEFT, position: 4800 }],
+            spacing: { after: 12 },
+            tabStops: [
+              { type: TabStopType.LEFT, position: 3200 },
+              { type: TabStopType.LEFT, position: 6400 },
+            ],
             children: [
-              new TextRun({ text: left, size: 18, font: FD, color: '333333' }),
+              new TextRun({ text: c1, size: 18, font: FD, color: '333333' }),
               new TextRun({ children: [new Tab()] }),
-              new TextRun({ text: right, size: 18, font: FD, color: '333333' }),
+              new TextRun({ text: c2, size: 18, font: FD, color: '333333' }),
+              new TextRun({ children: [new Tab()] }),
+              new TextRun({ text: c3, size: 18, font: FD, color: '333333' }),
             ],
           }));
         }
@@ -626,29 +658,28 @@ function buildCvDocx(text: string): Paragraph[] {
       }
       case 'certline':
         p.push(new Paragraph({
-          spacing: { after: 15 },
+          spacing: { after: 12 },
           children: [
-            new TextRun({ text: (b.prefix || '') + ' ', bold: true, size: 18, font: FD, color: '333333' }),
+            new TextRun({ text: (b.prefix || '') + ' ', bold: true, size: 18, font: FD }),
             new TextRun({ text: b.body || '', size: 18, font: FD, color: '333333' }),
           ],
         }));
         break;
       case 'text':
         if (prev === 'dateline') {
-          // Company/location line
           p.push(new Paragraph({
-            spacing: { after: 10 },
-            children: [new TextRun({ text: b.text, size: 18, font: FD, color: '555555' })],
+            spacing: { after: 8 },
+            children: [new TextRun({ text: b.text, italics: true, size: 18, font: FD, color: '666666' })],
           }));
         } else {
           p.push(new Paragraph({
-            spacing: { after: 15 },
+            spacing: { after: 12 },
             children: [new TextRun({ text: b.text, size: 19, font: FD, color: '333333' })],
           }));
         }
         break;
       case 'blank':
-        p.push(new Paragraph({ spacing: { after: 15 } }));
+        p.push(new Paragraph({ spacing: { after: 10 } }));
         break;
     }
     if (b.type !== 'divider') prev = b.type;
@@ -663,10 +694,7 @@ function buildCoverLetterDocx(text: string): Paragraph[] {
 
   for (let i = 0; i < lines.length; i++) {
     const t = lines[i].trim();
-    if (!t) {
-      p.push(new Paragraph({ spacing: { after: 100 } }));
-      continue;
-    }
+    if (!t) { p.push(new Paragraph({ spacing: { after: 100 } })); continue; }
     if (i < 2 && t === t.toUpperCase() && t.length > 3 && !t.includes('|')) {
       p.push(new Paragraph({
         spacing: { after: 20 },
@@ -676,9 +704,9 @@ function buildCoverLetterDocx(text: string): Paragraph[] {
     }
     if (i < 3 && t.includes('|')) {
       p.push(new Paragraph({
-        spacing: { after: 60 },
-        border: { bottom: { style: BorderStyle.SINGLE, size: 4, color: 'CCCCCC', space: 4 } },
-        children: [new TextRun({ text: t, size: 19, font: FD, color: '555555' })],
+        spacing: { after: 40 },
+        border: { bottom: { style: BorderStyle.SINGLE, size: 12, color: '000000', space: 4 } },
+        children: [new TextRun({ text: t, size: 19, font: FD, color: '666666' })],
       }));
       continue;
     }
@@ -687,7 +715,6 @@ function buildCoverLetterDocx(text: string): Paragraph[] {
       children: [new TextRun({ text: t, size: 22, font: FD })],
     }));
   }
-
   return p;
 }
 
@@ -698,9 +725,7 @@ export async function downloadAsDocx(text: string, filename: string) {
   const doc = new DocxDocument({
     sections: [{
       properties: {
-        page: {
-          margin: { top: 720, bottom: 720, left: 1020, right: 1020 },
-        },
+        page: { margin: { top: 720, bottom: 720, left: 1020, right: 1020 } },
       },
       children,
     }],
