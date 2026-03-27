@@ -36,6 +36,8 @@ async function searchAdzuna(
       results_per_page: '20',
       what: role,
       where: location,
+      max_days_old: '20',
+      sort_by: 'date',
     });
     if (salaryMin) params.set('salary_min', String(salaryMin));
     if (salaryMax) params.set('salary_max', String(salaryMax));
@@ -79,6 +81,7 @@ async function searchLinkedIn(role: string, location: string): Promise<JobListin
       keywords: role,
       location: location,
       start: '0',
+      f_TPR: 'r2592000', // Last 30 days
     });
 
     const url = `https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?${params.toString()}`;
@@ -145,7 +148,14 @@ async function searchLinkedIn(role: string, location: string): Promise<JobListin
       }
     }
 
-    return jobs.slice(0, 20); // Cap at 20
+    // Filter out jobs older than 20 days
+    const twentyDaysAgo = Date.now() - 20 * 24 * 60 * 60 * 1000;
+    const filtered = jobs.filter(job => {
+      const posted = new Date(job.posted_date).getTime();
+      return !isNaN(posted) ? posted >= twentyDaysAgo : true; // Keep if date unparseable
+    });
+
+    return filtered.slice(0, 20); // Cap at 20
   } catch (err) {
     console.error('[search-jobs] LinkedIn fetch error:', err);
     return [];
@@ -242,9 +252,10 @@ export async function POST(request: Request) {
       allJobs.push(...batch);
     }
 
-    // Filter and deduplicate
+    // Filter, deduplicate, sort newest first
     let jobs = deduplicateJobs(allJobs);
     jobs = filterExcluded(jobs, excluded_companies || []);
+    jobs.sort((a, b) => new Date(b.posted_date).getTime() - new Date(a.posted_date).getTime());
 
     // Save to job_listings table
     if (jobs.length > 0) {

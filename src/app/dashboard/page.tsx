@@ -99,6 +99,18 @@ function scoreBg(score: number): string {
   return 'bg-red-400/20 text-red-400';
 }
 
+function timeAgo(dateStr: string): string {
+  const posted = new Date(dateStr).getTime();
+  if (isNaN(posted)) return '';
+  const days = Math.floor((Date.now() - posted) / (1000 * 60 * 60 * 24));
+  if (days === 0) return 'Posted today';
+  if (days === 1) return 'Posted 1 day ago';
+  if (days < 7) return `Posted ${days} days ago`;
+  if (days < 14) return 'Posted 1 week ago';
+  if (days < 30) return `Posted ${Math.floor(days / 7)} weeks ago`;
+  return `Posted ${Math.floor(days / 30)} month(s) ago`;
+}
+
 function scoreBorder(score: number): string {
   if (score >= 65) return 'border-[#81C784]/40';
   if (score >= 40) return 'border-yellow-400/40';
@@ -277,7 +289,17 @@ export default function DashboardPage() {
       const scored: ScoredJob[] = allJobs.map(job => {
         const jdText = [job.title, job.description, job.company].join(' ');
         const cvMatchScore = calculateKeywordMatch(cvText, jdText);
-        const projectedScore = Math.min(95, Math.round(cvMatchScore * 1.6));
+        let projectedScore: number;
+        if (cvMatchScore < 30) {
+          projectedScore = cvMatchScore + 35;
+        } else if (cvMatchScore < 50) {
+          projectedScore = cvMatchScore + 30 + Math.round(cvMatchScore * 0.3);
+        } else if (cvMatchScore < 70) {
+          projectedScore = cvMatchScore + 20 + Math.round(cvMatchScore * 0.2);
+        } else {
+          projectedScore = cvMatchScore + 15;
+        }
+        projectedScore = Math.min(95, projectedScore);
         return { ...job, cvMatchScore, projectedScore };
       });
 
@@ -851,6 +873,9 @@ export default function DashboardPage() {
                             {job.salary !== 'Not specified' && (
                               <span className="text-[#81C784]">{job.salary}</span>
                             )}
+                            {job.posted_date && timeAgo(job.posted_date) && (
+                              <span className="text-gray-500 text-xs">{timeAgo(job.posted_date)}</span>
+                            )}
                           </div>
 
                           {/* STEP 2: Dual scores */}
@@ -861,12 +886,15 @@ export default function DashboardPage() {
                                 {job.cvMatchScore}%
                               </span>
                             </div>
-                            <div className="flex items-center gap-2">
-                              <TrendingUp className="w-3.5 h-3.5 text-gray-500" />
-                              <span className="text-xs text-gray-500">Projected After Tailoring:</span>
-                              <span className={`text-sm font-bold ${scoreColor(job.projectedScore)}`}>
-                                ~{job.projectedScore}%
-                              </span>
+                            <div className="flex flex-col">
+                              <div className="flex items-center gap-2">
+                                <TrendingUp className="w-3.5 h-3.5 text-gray-500" />
+                                <span className="text-xs text-gray-500">Projected After Tailoring:</span>
+                                <span className={`text-sm font-bold ${scoreColor(job.projectedScore)}`}>
+                                  ~{job.projectedScore}%
+                                </span>
+                              </div>
+                              <span className="text-[10px] text-gray-600 ml-5.5">Estimated based on keyword tailoring</span>
                             </div>
                             {isDone && prog.actualScore !== undefined && (
                               <div className="flex items-center gap-2">
