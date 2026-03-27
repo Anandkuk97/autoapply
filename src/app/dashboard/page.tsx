@@ -8,7 +8,7 @@ import {
   Sparkles, Navigation, AlertCircle, Download, Search, Zap, PlayCircle,
   MapPin, Building2, ExternalLink, ChevronDown, ChevronUp, Eye,
   StopCircle, DollarSign, SkipForward, XCircle, Info, ArrowRight,
-  Square, CheckSquare, TrendingUp, Mail, MoreVertical
+  Square, CheckSquare, TrendingUp, Mail, MoreVertical, Settings
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { downloadAsPdf, downloadAsDocx } from "@/lib/doc-export";
@@ -168,6 +168,11 @@ export default function DashboardPage() {
   // Bulk operations
   const [bulkEmailProgress, setBulkEmailProgress] = useState("");
   const [bulkOpenProgress, setBulkOpenProgress] = useState("");
+
+  // Auto-submit state
+  const [autoSubmitRunning, setAutoSubmitRunning] = useState(false);
+  const [autoSubmitProgress, setAutoSubmitProgress] = useState<any[]>([]);
+  const [autoSubmitModal, setAutoSubmitModal] = useState<string | null>(null); // application id
 
   const steps = [
     "Analyzing JD",
@@ -594,6 +599,63 @@ export default function DashboardPage() {
     });
   };
 
+  // ── Auto-Submit (LinkedIn) ──
+  const handleAutoSubmit = async (applicationId: string) => {
+    setAutoSubmitRunning(true);
+    setAutoSubmitProgress([]);
+    setAutoSubmitModal(applicationId);
+    setActionMenuOpen(null);
+
+    try {
+      const res = await fetch("/api/auto-submit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ application_ids: [applicationId] }),
+      });
+
+      const reader = res.body?.getReader();
+      const decoder = new TextDecoder();
+
+      if (!reader) {
+        setAutoSubmitProgress(prev => [...prev, { error: "No response stream" }]);
+        setAutoSubmitRunning(false);
+        return;
+      }
+
+      let buffer = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              setAutoSubmitProgress(prev => [...prev, data]);
+
+              if (data.applied) {
+                setApplications(prev =>
+                  prev.map(a => a.id === data.applied.id ? { ...a, status: "Applied" } : a)
+                );
+              }
+
+              if (data.done) {
+                setAutoSubmitRunning(false);
+              }
+            } catch {}
+          }
+        }
+      }
+    } catch (err: any) {
+      setAutoSubmitProgress(prev => [...prev, { error: err.message }]);
+    }
+    setAutoSubmitRunning(false);
+  };
+
   const handleStatusChange = async (id: string, newStatus: string) => {
     const { error } = await supabase
       .from("applications")
@@ -663,6 +725,16 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-1000 pb-12">
+
+      {/* QUICK ACTIONS */}
+      <div className="flex justify-end">
+        <button
+          onClick={() => router.push("/dashboard/settings")}
+          className="flex items-center gap-2 px-4 py-2 text-sm text-gray-400 hover:text-white hover:bg-white/5 rounded-xl transition"
+        >
+          <Settings className="w-4 h-4" /> Settings
+        </button>
+      </div>
 
       {/* STATS BAR */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4 md:gap-6">
@@ -1562,7 +1634,7 @@ export default function DashboardPage() {
                     {new Date(app.applied_date).toLocaleDateString()}
                   </td>
                   <td className="px-6 py-4">
-                    <div className="flex items-center gap-1 relative">
+                    <div className="flex items-center gap-1">
                       {app.tailored_cv && (
                         <button
                           onClick={() => setViewingApp(viewingApp?.id === app.id ? null : app)}
@@ -1572,39 +1644,51 @@ export default function DashboardPage() {
                           <Eye className="w-4 h-4" />
                         </button>
                       )}
-                      {/* Action dropdown trigger */}
-                      {app.tailored_cv && (
-                        <div className="relative">
-                          <button
-                            onClick={() => setActionMenuOpen(actionMenuOpen === app.id ? null : app.id)}
-                            className="px-2 py-1 bg-[var(--color-primary)]/20 text-[var(--color-primary)] rounded text-xs font-bold hover:bg-[var(--color-primary)]/30 transition flex items-center gap-1"
-                          >
-                            Apply <ChevronDown className="w-3 h-3" />
-                          </button>
-                          {actionMenuOpen === app.id && (
-                            <div className="absolute right-0 top-full mt-1 bg-[#1a1a2e] border border-white/20 rounded-xl shadow-2xl z-20 w-52 py-1 overflow-hidden">
+                      {/* Action dropdown trigger — show for all apps with tailored content */}
+                      <div className="relative">
+                        <button
+                          onClick={() => setActionMenuOpen(actionMenuOpen === app.id ? null : app.id)}
+                          className="px-2.5 py-1.5 bg-[var(--color-primary)]/20 text-[var(--color-primary)] rounded-lg text-xs font-bold hover:bg-[var(--color-primary)]/30 transition flex items-center gap-1"
+                        >
+                          Apply <ChevronDown className="w-3 h-3" />
+                        </button>
+                        {actionMenuOpen === app.id && (
+                          <>
+                            {/* Click-outside overlay */}
+                            <div className="fixed inset-0 z-10" onClick={() => setActionMenuOpen(null)} />
+                            <div className="absolute right-0 top-full mt-1 bg-[#1a1a2e] border border-white/20 rounded-xl shadow-2xl z-20 w-56 py-1.5">
                               <button
                                 onClick={() => { setEmailApplyApp(app); setActionMenuOpen(null); }}
-                                className="w-full px-4 py-2.5 text-left text-sm text-gray-300 hover:bg-white/10 flex items-center gap-2 transition"
+                                className="w-full px-4 py-2.5 text-left text-sm text-gray-300 hover:bg-white/10 flex items-center gap-2.5 transition"
                               >
-                                <Mail className="w-4 h-4 text-blue-400" /> Apply via Email
+                                <Mail className="w-4 h-4 text-blue-400 shrink-0" /> Apply via Email
                               </button>
                               <button
                                 onClick={() => { router.push(`/dashboard/apply/${app.id}`); setActionMenuOpen(null); }}
-                                className="w-full px-4 py-2.5 text-left text-sm text-gray-300 hover:bg-white/10 flex items-center gap-2 transition"
+                                className="w-full px-4 py-2.5 text-left text-sm text-gray-300 hover:bg-white/10 flex items-center gap-2.5 transition"
                               >
-                                <ExternalLink className="w-4 h-4 text-[var(--color-primary)]" /> Open &amp; Apply Manually
+                                <ExternalLink className="w-4 h-4 text-[var(--color-primary)] shrink-0" /> Open &amp; Apply Manually
                               </button>
+                              {app.source_url && app.source_url.includes('linkedin') && (
+                                <button
+                                  onClick={() => handleAutoSubmit(app.id)}
+                                  disabled={autoSubmitRunning}
+                                  className="w-full px-4 py-2.5 text-left text-sm text-gray-300 hover:bg-white/10 flex items-center gap-2.5 transition disabled:opacity-50"
+                                >
+                                  <Zap className="w-4 h-4 text-yellow-400 shrink-0" /> Auto-Submit (LinkedIn)
+                                </button>
+                              )}
+                              <div className="border-t border-white/10 my-1" />
                               <button
                                 onClick={() => handleMarkApplied(app.id)}
-                                className="w-full px-4 py-2.5 text-left text-sm text-gray-300 hover:bg-white/10 flex items-center gap-2 transition"
+                                className="w-full px-4 py-2.5 text-left text-sm text-gray-300 hover:bg-white/10 flex items-center gap-2.5 transition"
                               >
-                                <CheckCircle2 className="w-4 h-4 text-[#81C784]" /> Mark as Applied
+                                <CheckCircle2 className="w-4 h-4 text-[#81C784] shrink-0" /> Mark as Applied
                               </button>
                             </div>
-                          )}
-                        </div>
-                      )}
+                          </>
+                        )}
+                      </div>
                       {app.source_url && (
                         <a
                           href={app.source_url}
@@ -1876,6 +1960,71 @@ export default function DashboardPage() {
                     </button>
                   </div>
                 </>
+              )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* AUTO-SUBMIT PROGRESS MODAL */}
+      <AnimatePresence>
+        {autoSubmitModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center"
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-[#1a1a2e] border border-white/10 rounded-3xl max-w-lg w-full mx-4 p-6 max-h-[80vh] overflow-y-auto"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                <Zap className="w-5 h-5 text-yellow-400" /> Auto-Submit Progress
+              </h3>
+
+              <div className="space-y-2 mb-4">
+                {autoSubmitProgress.map((event, i) => (
+                  <div key={i} className={`text-sm p-2 rounded-lg ${
+                    event.error ? 'bg-red-500/10 text-red-400' :
+                    event.applied ? 'bg-green-500/10 text-green-400' :
+                    event.warning ? 'bg-yellow-500/10 text-yellow-400' :
+                    'bg-white/5 text-gray-300'
+                  }`}>
+                    {event.error && <span>❌ {event.error}</span>}
+                    {event.applied && <span>✅ Applied to {event.applied.role} at {event.applied.company}</span>}
+                    {event.failed && <span>⚠️ Failed: {event.failed.role} — {event.failed.error}</span>}
+                    {event.message && !event.error && !event.applied && !event.failed && (
+                      <span>{event.message}</span>
+                    )}
+                    {event.warning && <span>⚠️ {event.warning}</span>}
+                    {event.progress?.screenshot && (
+                      <img
+                        src={`data:image/jpeg;base64,${event.progress.screenshot}`}
+                        alt="Step screenshot"
+                        className="mt-2 rounded-lg border border-white/10 w-full"
+                      />
+                    )}
+                  </div>
+                ))}
+                {autoSubmitRunning && (
+                  <div className="flex items-center gap-2 text-gray-400 text-sm p-2">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Processing...
+                  </div>
+                )}
+              </div>
+
+              {!autoSubmitRunning && (
+                <button
+                  onClick={() => { setAutoSubmitModal(null); setAutoSubmitProgress([]); }}
+                  className="w-full px-4 py-2.5 bg-white/10 text-white rounded-xl hover:bg-white/20 transition font-medium"
+                >
+                  Close
+                </button>
               )}
             </motion.div>
           </motion.div>
