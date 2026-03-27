@@ -6,7 +6,8 @@ import {
   Copy, CheckCircle2, CircleDashed, Briefcase, FileText, Check, Loader2,
   Sparkles, Navigation, AlertCircle, Download, Search, Zap, PlayCircle,
   MapPin, Building2, ExternalLink, ChevronDown, ChevronUp, Eye,
-  StopCircle, DollarSign, SkipForward, XCircle, Info, ArrowRight
+  StopCircle, DollarSign, SkipForward, XCircle, Info, ArrowRight,
+  Square, CheckSquare, TrendingUp
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { downloadAsPdf, downloadAsDocx } from "@/lib/doc-export";
@@ -26,12 +27,90 @@ interface JobListing {
   status?: string;
 }
 
+interface ScoredJob extends JobListing {
+  cvMatchScore: number;      // Current CV keyword match (0-100)
+  projectedScore: number;    // Estimated after tailoring
+}
+
+type JobGenStatus = 'idle' | 'analyzing' | 'scoring' | 'tailoring' | 'writing' | 'done' | 'error';
+
+interface JobGenProgress {
+  status: JobGenStatus;
+  error?: string;
+  result?: any;          // The generation result (tailored_cv, cover_letter, etc.)
+  originalScore: number; // The keyword score before tailoring
+  actualScore?: number;  // The real match score after Claude analysis
+}
+
+const MAX_DISPLAY_JOBS = 15;
+
+// ── Client-side keyword matching (no API call) ──
+function extractKeywords(text: string): Set<string> {
+  if (!text) return new Set();
+  const stopWords = new Set([
+    'the','a','an','and','or','but','in','on','at','to','for','of','with','by',
+    'from','as','is','was','are','were','been','be','have','has','had','do',
+    'does','did','will','would','could','should','may','might','shall','can',
+    'this','that','these','those','it','its','i','we','you','they','he','she',
+    'my','our','your','their','his','her','not','no','all','each','every',
+    'any','some','such','than','too','very','just','about','above','after',
+    'also','into','over','under','between','through','during','before',
+    'more','most','other','which','who','whom','what','when','where','how',
+    'if','then','so','up','out','about','work','working','experience',
+    'role','position','job','company','team','ability','strong','good',
+    'well','new','year','years','including','etc','e.g','eg','ie',
+  ]);
+
+  return new Set(
+    text
+      .toLowerCase()
+      .replace(/[^a-z0-9\s+#.\-]/g, ' ')
+      .split(/\s+/)
+      .filter(w => w.length > 2 && !stopWords.has(w))
+  );
+}
+
+function calculateKeywordMatch(cvText: string, jdText: string): number {
+  const cvKeywords = extractKeywords(cvText);
+  const jdKeywords = extractKeywords(jdText);
+
+  if (jdKeywords.size === 0) return 0;
+
+  let matches = 0;
+  for (const kw of jdKeywords) {
+    if (cvKeywords.has(kw)) matches++;
+  }
+
+  // Raw overlap percentage
+  const rawScore = Math.round((matches / jdKeywords.size) * 100);
+  // Clamp to 0-100
+  return Math.min(100, Math.max(0, rawScore));
+}
+
+function scoreColor(score: number): string {
+  if (score >= 65) return 'text-[#81C784]';
+  if (score >= 40) return 'text-yellow-400';
+  return 'text-red-400';
+}
+
+function scoreBg(score: number): string {
+  if (score >= 65) return 'bg-[#81C784]/20 text-[#81C784]';
+  if (score >= 40) return 'bg-yellow-400/20 text-yellow-400';
+  return 'bg-red-400/20 text-red-400';
+}
+
+function scoreBorder(score: number): string {
+  if (score >= 65) return 'border-[#81C784]/40';
+  if (score >= 40) return 'border-yellow-400/40';
+  return 'border-red-400/40';
+}
+
 export default function DashboardPage() {
   const [applications, setApplications] = useState<any[]>([]);
   const [loadingApps, setLoadingApps] = useState(true);
   const [user, setUser] = useState<any>(null);
 
-  // Generator States
+  // Generator States (manual JD)
   const [jobDescription, setJobDescription] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [progressStep, setProgressStep] = useState(0);
@@ -43,23 +122,17 @@ export default function DashboardPage() {
   const [userProfile, setUserProfile] = useState<any>(null);
 
   // Job Search States
-  const [foundJobs, setFoundJobs] = useState<JobListing[]>([]);
+  const [scoredJobs, setScoredJobs] = useState<ScoredJob[]>([]);
+  const [totalJobsFound, setTotalJobsFound] = useState(0);
   const [isSearching, setIsSearching] = useState(false);
   const [searchError, setSearchError] = useState("");
   const [searchCriteria, setSearchCriteria] = useState<any>(null);
 
-  // Auto-Apply States (SSE-based)
-  const [isAutoApplying, setIsAutoApplying] = useState(false);
-  const [autoProgress, setAutoProgress] = useState("");
-  const [autoProgressDetail, setAutoProgressDetail] = useState<{
-    current: number; total: number; job_title: string; company: string; match_score?: number;
-  } | null>(null);
-  const [autoResults, setAutoResults] = useState<any>(null);
-  const abortControllerRef = useRef<AbortController | null>(null);
-
-  // Automation (full pipeline) States
-  const [isAutomating, setIsAutomating] = useState(false);
-  const [automationStep, setAutomationStep] = useState("");
+  // Per-job generation tracking
+  const [jobProgress, setJobProgress] = useState<Record<string, JobGenProgress>>({});
+  const [selectedJobs, setSelectedJobs] = useState<Set<string>>(new Set());
+  const [isBulkProcessing, setIsBulkProcessing] = useState(false);
+  const bulkAbortRef = useRef(false);
 
   // Job cards expanded state
   const [expandedJob, setExpandedJob] = useState<string | null>(null);
@@ -67,7 +140,7 @@ export default function DashboardPage() {
 
   // Approval confirmation
   const [approvalMessage, setApprovalMessage] = useState("");
-  const [approvedApp, setApprovedApp] = useState<any>(null); // For post-approval popup
+  const [approvedApp, setApprovedApp] = useState<any>(null);
 
   const steps = [
     "Analyzing JD",
@@ -86,7 +159,6 @@ export default function DashboardPage() {
     if (authUser) setUser(authUser);
 
     if (authUser) {
-      // Fetch applications (client-side) and profile (server-side to bypass RLS) in parallel
       const [appsResult, profileRes] = await Promise.all([
         supabase
           .from("applications")
@@ -100,17 +172,8 @@ export default function DashboardPage() {
         setApplications(appsResult.data);
       }
 
-      console.log("[dashboard] Profile API result:", profileRes);
       if (profileRes.profile) {
         setUserProfile(profileRes.profile);
-        console.log("[dashboard] Profile loaded:", {
-          name: profileRes.profile.name,
-          hasCv: !!profileRes.profile.cv_text,
-          target_roles: profileRes.profile.target_roles,
-          target_locations: profileRes.profile.target_locations
-        });
-      } else {
-        console.warn("[dashboard] No profile found for user:", authUser.id);
       }
     }
     setLoadingApps(false);
@@ -154,7 +217,7 @@ export default function DashboardPage() {
         role: data.jd_analysis.title,
         location: data.jd_analysis.location,
         match_score: data.match_assessment.score,
-        status: "Applied",
+        status: "ready",
         tailored_cv: data.tailored_cv,
         cover_letter: data.cover_letter,
         jd_text: jobDescription
@@ -183,12 +246,14 @@ export default function DashboardPage() {
     }
   };
 
-  // ── Job Search ──
+  // ── Job Search with client-side scoring ──
   const handleSearchJobs = async () => {
     setIsSearching(true);
     setSearchError("");
-    setFoundJobs([]);
-    setAutoResults(null);
+    setScoredJobs([]);
+    setTotalJobsFound(0);
+    setJobProgress({});
+    setSelectedJobs(new Set());
 
     try {
       const res = await fetch("/api/search-jobs", {
@@ -202,8 +267,24 @@ export default function DashboardPage() {
       }
 
       const data = await res.json();
-      setFoundJobs(data.jobs || []);
+      const allJobs: JobListing[] = data.jobs || [];
       setSearchCriteria(data.search_criteria);
+      setTotalJobsFound(allJobs.length);
+
+      const cvText = userProfile?.cv_text || "";
+
+      // Score each job by keyword overlap, sort descending, take top 15
+      const scored: ScoredJob[] = allJobs.map(job => {
+        const jdText = [job.title, job.description, job.company].join(' ');
+        const cvMatchScore = calculateKeywordMatch(cvText, jdText);
+        const projectedScore = Math.min(95, Math.round(cvMatchScore * 1.6));
+        return { ...job, cvMatchScore, projectedScore };
+      });
+
+      scored.sort((a, b) => b.cvMatchScore - a.cvMatchScore);
+      const top = scored.slice(0, MAX_DISPLAY_JOBS);
+      setScoredJobs(top);
+
     } catch (err: any) {
       setSearchError(err.message);
     } finally {
@@ -211,182 +292,177 @@ export default function DashboardPage() {
     }
   };
 
-  // ── SSE Auto-Apply consumer ──
-  const runAutoApplySSE = async () => {
-    const controller = new AbortController();
-    abortControllerRef.current = controller;
+  // ── Generate for a single job ──
+  const generateForJob = async (job: ScoredJob, mode: 'manual' | 'auto') => {
+    if (!user) return;
 
-    setAutoResults(null);
-    setAutoProgressDetail(null);
+    setJobProgress(prev => ({
+      ...prev,
+      [job.id]: { status: 'analyzing', originalScore: job.cvMatchScore }
+    }));
+
+    // Build synthetic JD
+    const syntheticJD = [
+      `Job Title: ${job.title}`,
+      `Company: ${job.company}`,
+      `Location: ${job.location}`,
+      job.salary !== 'Not specified' ? `Salary: ${job.salary}` : '',
+      '',
+      'Job Description:',
+      job.description,
+    ].filter(Boolean).join('\n');
 
     try {
-      const res = await fetch("/api/auto-apply", {
+      // Step-by-step progress simulation + real API call
+      setJobProgress(prev => ({
+        ...prev,
+        [job.id]: { ...prev[job.id], status: 'analyzing' }
+      }));
+
+      const stepTimers = [
+        setTimeout(() => setJobProgress(prev => ({
+          ...prev,
+          [job.id]: { ...prev[job.id], status: 'scoring' }
+        })), 3000),
+        setTimeout(() => setJobProgress(prev => ({
+          ...prev,
+          [job.id]: { ...prev[job.id], status: 'tailoring' }
+        })), 6000),
+        setTimeout(() => setJobProgress(prev => ({
+          ...prev,
+          [job.id]: { ...prev[job.id], status: 'writing' }
+        })), 9000),
+      ];
+
+      const res = await fetch("/api/generate-application", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        signal: controller.signal,
+        body: JSON.stringify({ job_description: syntheticJD, user_id: user.id })
       });
+
+      stepTimers.forEach(clearTimeout);
 
       if (!res.ok) {
-        // Non-SSE error (auth, missing CV, etc)
-        const errText = await res.text();
-        try {
-          const errJson = JSON.parse(errText);
-          throw new Error(errJson.error || "Auto-apply failed");
-        } catch {
-          throw new Error(errText.slice(0, 200) || "Auto-apply failed");
-        }
+        const errBody = await res.text();
+        throw new Error(errBody.slice(0, 200) || "Generation failed");
       }
 
-      const reader = res.body?.getReader();
-      if (!reader) throw new Error("No response stream");
+      const data = await res.json();
+      const actualScore = data.match_assessment?.score || 0;
 
-      const decoder = new TextDecoder();
-      let buffer = "";
+      // Save to DB
+      const { data: inserted, error: dbError } = await supabase.from("applications").insert({
+        user_id: user.id,
+        company: data.jd_analysis?.company || job.company,
+        role: data.jd_analysis?.title || job.title,
+        location: data.jd_analysis?.location || job.location,
+        salary: job.salary,
+        match_score: actualScore,
+        status: "ready",
+        tailored_cv: data.tailored_cv,
+        cover_letter: data.cover_letter,
+        jd_text: syntheticJD,
+        source_url: job.source_url,
+      }).select().single();
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+      if (!dbError && inserted) {
+        setApplications(prev => [inserted, ...prev]);
+      }
 
-        buffer += decoder.decode(value, { stream: true });
-
-        // Parse SSE events from buffer
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || ""; // Keep incomplete line in buffer
-
-        let currentEvent = "";
-        for (const line of lines) {
-          if (line.startsWith("event: ")) {
-            currentEvent = line.slice(7).trim();
-          } else if (line.startsWith("data: ") && currentEvent) {
-            try {
-              const data = JSON.parse(line.slice(6));
-              handleSSEEvent(currentEvent, data);
-            } catch {
-              console.warn("[dashboard] Failed to parse SSE data:", line);
-            }
-            currentEvent = "";
+      setJobProgress(prev => ({
+        ...prev,
+        [job.id]: {
+          status: 'done',
+          originalScore: job.cvMatchScore,
+          actualScore,
+          result: {
+            ...data,
+            application: inserted,
+            mode,
           }
         }
-      }
-    } catch (err: any) {
-      if (err.name === "AbortError") {
-        setAutoProgress("Pipeline stopped by user.");
-      } else {
-        setSearchError(err.message);
-        setAutoProgress("");
-      }
-    } finally {
-      abortControllerRef.current = null;
-      setIsAutoApplying(false);
-      setIsAutomating(false);
-      setAutoProgressDetail(null);
-    }
-  };
+      }));
 
-  const handleSSEEvent = (event: string, data: any) => {
-    switch (event) {
-      case "progress":
-        setAutoProgress(data.message);
-        break;
-      case "job_start":
-        setAutoProgressDetail({
-          current: data.current,
-          total: data.total,
-          job_title: data.job_title,
-          company: data.company,
-        });
-        setAutoProgress(`Generating application ${data.current} of ${data.total}...`);
-        break;
-      case "job_retry":
-        setAutoProgress(`Rate limited — retrying ${data.job_title} at ${data.company} in 10s...`);
-        break;
-      case "job_complete":
-        // Add the new application to the list immediately
-        if (data.application) {
-          setApplications(prev => [data.application, ...prev]);
+      // Auto-expand the completed job
+      setExpandedJob(job.id);
+
+    } catch (err: any) {
+      setJobProgress(prev => ({
+        ...prev,
+        [job.id]: {
+          status: 'error',
+          originalScore: job.cvMatchScore,
+          error: err.message
         }
-        setAutoProgressDetail(prev => prev ? { ...prev, match_score: data.match_score } : null);
-        setAutoProgress(
-          `Generated: ${data.job_title} at ${data.company} (${data.match_score}% match)`
-        );
-        break;
-      case "job_skipped":
-        setAutoProgress(
-          `Skipped: ${data.job_title} at ${data.company} (${data.match_score}% — below threshold)`
-        );
-        break;
-      case "job_error":
-        setAutoProgress(`Error: ${data.job_title} at ${data.company} — ${data.error}`);
-        break;
-      case "cancelled":
-        setAutoProgress(`Stopped: ${data.total_processed} processed, ${data.total_generated} generated.`);
-        break;
-      case "complete":
-        setAutoResults(data);
-        setAutoProgress("");
-        setAutoProgressDetail(null);
-        break;
-      case "error":
-        setSearchError(data.message);
-        setAutoProgress("");
-        setAutoProgressDetail(null);
-        break;
+      }));
     }
   };
 
-  // ── Stop button ──
-  const handleStopPipeline = () => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-      abortControllerRef.current = null;
+  // ── Bulk: Tailor All Top Jobs ──
+  const handleTailorAll = async (mode: 'manual' | 'auto') => {
+    const jobsToProcess = scoredJobs.filter(j => {
+      const prog = jobProgress[j.id];
+      return !prog || prog.status === 'idle' || prog.status === 'error';
+    });
+    if (jobsToProcess.length === 0) return;
+
+    setIsBulkProcessing(true);
+    bulkAbortRef.current = false;
+
+    for (const job of jobsToProcess) {
+      if (bulkAbortRef.current) break;
+      await generateForJob(job, mode);
+      // 3s delay between API calls to avoid rate limiting
+      if (!bulkAbortRef.current) {
+        await new Promise(r => setTimeout(r, 3000));
+      }
     }
+
+    setIsBulkProcessing(false);
   };
 
-  // ── Auto-Generate All ──
-  const handleAutoGenerate = async () => {
-    setIsAutoApplying(true);
-    setSearchError("");
-    setAutoProgress("Starting auto-generation pipeline...");
-    await runAutoApplySSE();
+  // ── Bulk: Tailor Selected ──
+  const handleTailorSelected = async (mode: 'manual' | 'auto') => {
+    const jobsToProcess = scoredJobs.filter(j => {
+      const prog = jobProgress[j.id];
+      return selectedJobs.has(j.id) && (!prog || prog.status === 'idle' || prog.status === 'error');
+    });
+    if (jobsToProcess.length === 0) return;
+
+    setIsBulkProcessing(true);
+    bulkAbortRef.current = false;
+
+    for (const job of jobsToProcess) {
+      if (bulkAbortRef.current) break;
+      await generateForJob(job, mode);
+      if (!bulkAbortRef.current) {
+        await new Promise(r => setTimeout(r, 3000));
+      }
+    }
+
+    setIsBulkProcessing(false);
+    setSelectedJobs(new Set());
   };
 
-  // ── Full Automation Pipeline ──
-  const handleFullAutomation = async () => {
-    setIsAutomating(true);
-    setSearchError("");
-    setAutomationStep("Searching for matching jobs...");
+  const handleStopBulk = () => {
+    bulkAbortRef.current = true;
+  };
 
-    try {
-      // Step 1: Search
-      const searchRes = await fetch("/api/search-jobs", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-      });
+  // ── Selection helpers ──
+  const toggleJobSelection = (jobId: string) => {
+    setSelectedJobs(prev => {
+      const next = new Set(prev);
+      if (next.has(jobId)) next.delete(jobId);
+      else next.add(jobId);
+      return next;
+    });
+  };
 
-      if (!searchRes.ok) {
-        const err = await searchRes.json();
-        throw new Error(err.error || "Search failed");
-      }
-
-      const searchData = await searchRes.json();
-      setFoundJobs(searchData.jobs || []);
-      setSearchCriteria(searchData.search_criteria);
-
-      if (searchData.jobs.length === 0) {
-        setAutomationStep("No matching jobs found. Adjust your preferences.");
-        setIsAutomating(false);
-        return;
-      }
-
-      setAutomationStep(`Found ${searchData.jobs.length} jobs. Starting generation...`);
-
-      // Step 2: Auto-apply via SSE
-      setAutoProgress("Connecting to generation pipeline...");
-      await runAutoApplySSE();
-    } catch (err: any) {
-      setAutomationStep("");
-      setSearchError(err.message);
-      setIsAutomating(false);
+  const toggleSelectAll = () => {
+    if (selectedJobs.size === scoredJobs.length) {
+      setSelectedJobs(new Set());
+    } else {
+      setSelectedJobs(new Set(scoredJobs.map(j => j.id)));
     }
   };
 
@@ -434,7 +510,7 @@ export default function DashboardPage() {
     }
   };
 
-  // Stats calc
+  // Stats
   const totalApplied = applications.length;
   const callbacks = applications.filter(a => a.status === "Callback" || a.status === "Interview").length;
   const interviews = applications.filter(a => a.status === "Interview").length;
@@ -453,9 +529,9 @@ export default function DashboardPage() {
     }
   };
 
-  const isAnyProcessRunning = isSearching || isAutoApplying || isAutomating || isGenerating;
+  const isAnyProcessRunning = isSearching || isGenerating || isBulkProcessing;
 
-  // ── FIX 2: Status label mappings ──
+  // ── Status label mappings ──
   const statusLabels: Record<string, string> = {
     "ready": "Ready to Review",
     "Applied": "Applied \u2713",
@@ -471,6 +547,23 @@ export default function DashboardPage() {
     "Interview": "text-yellow-400 border-yellow-400/30",
     "Rejected": "text-gray-500 border-gray-500/30",
     "No Response": "text-gray-500 border-gray-500/30",
+  };
+
+  // Count processing jobs
+  const processingCount = Object.values(jobProgress).filter(
+    p => p.status !== 'idle' && p.status !== 'done' && p.status !== 'error'
+  ).length;
+  const completedCount = Object.values(jobProgress).filter(p => p.status === 'done').length;
+
+  // Status label for generation step
+  const genStepLabel: Record<JobGenStatus, string> = {
+    idle: '',
+    analyzing: 'Analyzing job description...',
+    scoring: 'Scoring your match...',
+    tailoring: 'Tailoring your CV...',
+    writing: 'Writing cover letter...',
+    done: 'Complete!',
+    error: 'Failed',
   };
 
   return (
@@ -523,55 +616,12 @@ export default function DashboardPage() {
           </h3>
           <div className="space-y-3">
             {[
-              {
-                num: 1,
-                text: "Upload your CV",
-                done: !!userProfile?.cv_text,
-                action: !userProfile?.cv_text ? "/dashboard/profile" : null,
-                actionLabel: "Upload CV",
-              },
-              {
-                num: 2,
-                text: "Set your job preferences",
-                done: !!(userProfile?.target_roles?.length && userProfile?.target_locations?.length),
-                action: !(userProfile?.target_roles?.length && userProfile?.target_locations?.length) ? "/dashboard/preferences" : null,
-                actionLabel: "Set Preferences",
-              },
-              {
-                num: 3,
-                text: "Click 'Find Jobs' to discover matching roles",
-                done: foundJobs.length > 0,
-                action: null,
-                actionLabel: null,
-              },
-              {
-                num: 4,
-                text: "Review matched jobs and their scores",
-                done: foundJobs.length > 0,
-                action: null,
-                actionLabel: null,
-              },
-              {
-                num: 5,
-                text: "Click 'Start Automation' to tailor CV and cover letter for each job",
-                done: applications.some(a => a.status === "ready"),
-                action: null,
-                actionLabel: null,
-              },
-              {
-                num: 6,
-                text: "Review and approve applications",
-                done: applications.some(a => a.status === "Applied"),
-                action: null,
-                actionLabel: null,
-              },
-              {
-                num: 7,
-                text: "Download tailored documents and submit applications manually",
-                done: false,
-                action: null,
-                actionLabel: null,
-              },
+              { num: 1, text: "Upload your CV", done: !!userProfile?.cv_text, action: !userProfile?.cv_text ? "/dashboard/profile" : null, actionLabel: "Upload CV" },
+              { num: 2, text: "Set your job preferences (roles, locations)", done: !!(userProfile?.target_roles?.length && userProfile?.target_locations?.length), action: !(userProfile?.target_roles?.length && userProfile?.target_locations?.length) ? "/dashboard/preferences" : null, actionLabel: "Set Preferences" },
+              { num: 3, text: "Click 'Find Jobs' — we show the top 15 most relevant matches with scores", done: scoredJobs.length > 0, action: null, actionLabel: null },
+              { num: 4, text: "Review each job's match score and choose which to tailor for", done: scoredJobs.length > 0, action: null, actionLabel: null },
+              { num: 5, text: "Click 'Tailor & Download' to generate a custom CV and cover letter", done: completedCount > 0, action: null, actionLabel: null },
+              { num: 6, text: "Download your tailored documents and submit applications manually", done: applications.some(a => a.status === "Applied"), action: null, actionLabel: null },
             ].map((item) => (
               <div key={item.num} className="flex items-center gap-3">
                 <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
@@ -583,10 +633,7 @@ export default function DashboardPage() {
                   {item.text}
                 </span>
                 {item.action && (
-                  <a
-                    href={item.action}
-                    className="px-3 py-1 bg-[var(--color-primary)]/20 text-[var(--color-primary)] rounded-lg text-xs font-bold hover:bg-[var(--color-primary)]/30 transition"
-                  >
+                  <a href={item.action} className="px-3 py-1 bg-[var(--color-primary)]/20 text-[var(--color-primary)] rounded-lg text-xs font-bold hover:bg-[var(--color-primary)]/30 transition">
                     {item.actionLabel} &rarr;
                   </a>
                 )}
@@ -597,12 +644,12 @@ export default function DashboardPage() {
       )}
 
       {/* ═══════════════════════════════════════════════════════════ */}
-      {/* AUTOMATED JOB SEARCH & APPLY SECTION                      */}
+      {/* STEP 1: JOB SEARCH                                        */}
       {/* ═══════════════════════════════════════════════════════════ */}
       <div className="bg-white/5 border border-white/10 p-6 md:p-8 rounded-3xl space-y-6">
         <h2 className="text-2xl font-heading font-bold text-white flex items-center gap-2">
-          <Zap className="text-[var(--color-primary)] w-6 h-6" />
-          Automated Job Search & Apply
+          <Search className="text-[var(--color-primary)] w-6 h-6" />
+          Find &amp; Tailor Jobs
         </h2>
 
         {/* Preferences indicator */}
@@ -632,185 +679,483 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {/* Progress indicator */}
-        {(isSearching || isAutoApplying || isAutomating) && (
-          <div className="bg-[var(--color-primary)]/10 border border-[var(--color-primary)]/30 px-4 py-3 rounded-xl space-y-2">
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-3 flex-1 min-w-0">
-                <Loader2 className="w-5 h-5 animate-spin text-[var(--color-primary)] shrink-0" />
-                <span className="text-[var(--color-primary)] font-medium text-sm truncate">
-                  {isSearching && "Searching for matching jobs..."}
-                  {(isAutoApplying || isAutomating) && (autoProgress || automationStep || "Processing...")}
-                </span>
-              </div>
-              {(isAutoApplying || isAutomating) && !isSearching && (
-                <button
-                  onClick={handleStopPipeline}
-                  className="px-3 py-1.5 bg-red-500/20 border border-red-500/40 text-red-400 rounded-lg text-xs font-bold flex items-center gap-1 hover:bg-red-500/30 transition shrink-0"
-                >
-                  <StopCircle className="w-3.5 h-3.5" /> Stop
-                </button>
-              )}
-            </div>
-            {/* Progress bar */}
-            {autoProgressDetail && (
-              <div className="space-y-1">
-                <div className="flex justify-between text-[11px] text-gray-400">
-                  <span>{autoProgressDetail.job_title} at {autoProgressDetail.company}</span>
-                  <span>{autoProgressDetail.current}/{autoProgressDetail.total}</span>
-                </div>
-                <div className="w-full bg-white/10 rounded-full h-1.5">
-                  <div
-                    className="bg-[var(--color-primary)] h-1.5 rounded-full transition-all duration-500"
-                    style={{ width: `${(autoProgressDetail.current / autoProgressDetail.total) * 100}%` }}
-                  />
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Action buttons */}
+        {/* Search button */}
         <div className="flex flex-wrap gap-3">
           <button
             onClick={handleSearchJobs}
             disabled={isAnyProcessRunning || !userProfile?.target_roles?.length}
-            className="px-6 py-3 bg-white/10 border border-white/20 text-white font-bold rounded-xl flex items-center gap-2 hover:bg-white/20 transition hover:scale-[1.02] active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="px-6 py-3 bg-[var(--color-primary)] text-black font-bold rounded-xl flex items-center gap-2 hover:bg-yellow-400 transition hover:scale-[1.02] active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isSearching ? <Loader2 className="w-5 h-5 animate-spin" /> : <Search className="w-5 h-5" />}
             Find Jobs
           </button>
-
-          <button
-            onClick={handleFullAutomation}
-            disabled={isAnyProcessRunning || !userProfile?.cv_text || !userProfile?.target_roles?.length}
-            className="px-6 py-3 bg-[var(--color-primary)] text-black font-bold rounded-xl flex items-center gap-2 hover:bg-yellow-400 transition hover:scale-[1.02] active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {isAutomating ? <Loader2 className="w-5 h-5 animate-spin" /> : <PlayCircle className="w-5 h-5" />}
-            Start Automation
-          </button>
         </div>
 
-        {/* Auto-apply results summary */}
-        {autoResults && (
-          <div className="bg-[#81C784]/10 border border-[#81C784]/30 p-5 rounded-xl space-y-4">
-            <h4 className="text-white font-bold flex items-center gap-2">
-              <CheckCircle2 className="w-5 h-5 text-[#81C784]" />
-              Automation Complete
-            </h4>
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-center">
-              <div>
-                <div className="text-2xl font-bold text-white">{autoResults.total_processed || autoResults.total_found}</div>
-                <div className="text-xs text-gray-400">Processed</div>
-              </div>
-              <div>
-                <div className="text-2xl font-bold text-[#81C784]">{autoResults.total_generated}</div>
-                <div className="text-xs text-gray-400">Generated</div>
-              </div>
-              <div>
-                <div className="text-2xl font-bold text-yellow-400">{autoResults.total_skipped || 0}</div>
-                <div className="text-xs text-gray-400">Skipped (&lt;65%)</div>
-              </div>
-              <div>
-                <div className="text-2xl font-bold text-red-400">{autoResults.total_errors || 0}</div>
-                <div className="text-xs text-gray-400">Errors</div>
-              </div>
-              <div>
-                <div className="text-2xl font-bold text-[var(--color-primary)] flex items-center justify-center gap-1">
-                  <DollarSign className="w-4 h-4" />
-                  {autoResults.estimated_cost || '$0.00'}
-                </div>
-                <div className="text-xs text-gray-400">Est. Cost</div>
-              </div>
-            </div>
-            <p className="text-xs text-gray-500 text-center">
-              {autoResults.total_processed || autoResults.total_found} jobs processed, {autoResults.total_generated} applications generated,{' '}
-              {autoResults.total_skipped || 0} skipped (below 65% match).
-              Estimated API cost: {autoResults.estimated_cost || '$0.00'}
-            </p>
+        {/* Search progress */}
+        {isSearching && (
+          <div className="bg-[var(--color-primary)]/10 border border-[var(--color-primary)]/30 px-4 py-3 rounded-xl flex items-center gap-3">
+            <Loader2 className="w-5 h-5 animate-spin text-[var(--color-primary)]" />
+            <span className="text-[var(--color-primary)] font-medium text-sm">Searching job boards and scoring matches against your CV...</span>
           </div>
         )}
       </div>
 
       {/* ═══════════════════════════════════════════════════════════ */}
-      {/* FOUND JOBS LIST                                            */}
+      {/* STEP 2 & 3: SCORED JOB CARDS                              */}
       {/* ═══════════════════════════════════════════════════════════ */}
-      {foundJobs.length > 0 && (
-        <div className="bg-white/5 border border-white/10 rounded-3xl overflow-hidden">
-          <div className="p-6 border-b border-white/10 flex justify-between items-center">
-            <h2 className="text-xl font-heading font-bold text-white flex items-center gap-2">
-              <Search className="text-[var(--color-primary)] w-5 h-5" />
-              Found Jobs ({foundJobs.length})
-              {searchCriteria && (
-                <span className="text-sm font-normal text-gray-400 ml-2">
-                  {searchCriteria.roles?.join(", ")} in {searchCriteria.locations?.join(", ")}
-                </span>
-              )}
-            </h2>
-          </div>
-          <div className="divide-y divide-white/5 max-h-[500px] overflow-y-auto">
-            {foundJobs.map((job) => (
-              <div key={job.id} className="hover:bg-white/5 transition">
-                <div className="px-6 py-4 flex items-center justify-between gap-4">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <h3 className="font-bold text-white truncate">{job.title}</h3>
-                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
-                        job.source === 'adzuna' ? 'bg-blue-500/20 text-blue-400' : 'bg-sky-500/20 text-sky-400'
-                      }`}>
-                        {job.source}
+      {scoredJobs.length > 0 && (
+        <div className="space-y-4">
+          {/* Header with count message and bulk actions */}
+          <div className="bg-white/5 border border-white/10 rounded-3xl overflow-hidden">
+            <div className="p-6 border-b border-white/10">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-xl font-heading font-bold text-white flex items-center gap-2">
+                    <Briefcase className="text-[var(--color-primary)] w-5 h-5" />
+                    Top Matches
+                    {searchCriteria && (
+                      <span className="text-sm font-normal text-gray-400 ml-2">
+                        {searchCriteria.roles?.join(", ")} in {searchCriteria.locations?.join(", ")}
                       </span>
-                    </div>
-                    <div className="flex items-center gap-3 text-sm text-gray-400 mt-1">
-                      <span className="flex items-center gap-1">
-                        <Building2 className="w-3.5 h-3.5" /> {job.company}
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <MapPin className="w-3.5 h-3.5" /> {job.location}
-                      </span>
-                      {job.salary !== 'Not specified' && (
-                        <span className="text-[#81C784]">{job.salary}</span>
-                      )}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    {job.source_url && (
-                      <a
-                        href={job.source_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="p-2 hover:bg-white/10 rounded-lg transition text-gray-400 hover:text-white"
-                        title="View original"
-                      >
-                        <ExternalLink className="w-4 h-4" />
-                      </a>
                     )}
-                    <button
-                      onClick={() => setExpandedJob(expandedJob === job.id ? null : job.id)}
-                      className="p-2 hover:bg-white/10 rounded-lg transition text-gray-400"
-                    >
-                      {expandedJob === job.id ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                    </button>
-                  </div>
+                  </h2>
+                  {totalJobsFound > MAX_DISPLAY_JOBS && (
+                    <p className="text-sm text-gray-400 mt-1">
+                      Showing top {MAX_DISPLAY_JOBS} most aligned roles out of {totalJobsFound} found.
+                    </p>
+                  )}
+                  {totalJobsFound > 0 && totalJobsFound <= MAX_DISPLAY_JOBS && (
+                    <p className="text-sm text-gray-400 mt-1">
+                      Found {totalJobsFound} matching jobs, sorted by CV relevance.
+                    </p>
+                  )}
                 </div>
-                {expandedJob === job.id && (
-                  <div className="px-6 pb-4">
-                    <p className="text-sm text-gray-400 leading-relaxed">{job.description.slice(0, 500)}{job.description.length > 500 ? '...' : ''}</p>
+
+                {/* Bulk progress indicator */}
+                {isBulkProcessing && (
+                  <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2 text-sm text-[var(--color-primary)]">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Processing {completedCount}/{scoredJobs.length}...
+                    </div>
+                    <button
+                      onClick={handleStopBulk}
+                      className="px-3 py-1.5 bg-red-500/20 border border-red-500/40 text-red-400 rounded-lg text-xs font-bold flex items-center gap-1 hover:bg-red-500/30 transition"
+                    >
+                      <StopCircle className="w-3.5 h-3.5" /> Stop
+                    </button>
                   </div>
                 )}
               </div>
-            ))}
+
+              {/* Bulk action bar */}
+              <div className="flex flex-wrap items-center gap-3 mt-4 pt-4 border-t border-white/10">
+                <button
+                  onClick={toggleSelectAll}
+                  className="flex items-center gap-2 text-sm text-gray-400 hover:text-white transition"
+                >
+                  {selectedJobs.size === scoredJobs.length ?
+                    <CheckSquare className="w-4 h-4 text-[var(--color-primary)]" /> :
+                    <Square className="w-4 h-4" />
+                  }
+                  {selectedJobs.size === scoredJobs.length ? 'Deselect All' : 'Select All'}
+                </button>
+
+                {selectedJobs.size > 0 && (
+                  <>
+                    <span className="text-gray-600">|</span>
+                    <span className="text-xs text-gray-400">{selectedJobs.size} selected</span>
+                    <button
+                      onClick={() => handleTailorSelected('manual')}
+                      disabled={isBulkProcessing || isGenerating}
+                      className="px-4 py-2 bg-blue-600 text-white font-bold rounded-lg text-sm flex items-center gap-1 hover:bg-blue-500 transition disabled:opacity-50"
+                    >
+                      <FileText className="w-4 h-4" /> Tailor Selected
+                    </button>
+                    <button
+                      onClick={() => handleTailorSelected('auto')}
+                      disabled={isBulkProcessing || isGenerating}
+                      className="px-4 py-2 bg-[var(--color-primary)] text-black font-bold rounded-lg text-sm flex items-center gap-1 hover:bg-yellow-400 transition disabled:opacity-50"
+                    >
+                      <Zap className="w-4 h-4" /> Tailor &amp; Apply Selected
+                    </button>
+                  </>
+                )}
+
+                <div className="flex-1" />
+
+                <button
+                  onClick={() => handleTailorAll('manual')}
+                  disabled={isBulkProcessing || isGenerating || !userProfile?.cv_text}
+                  className="px-4 py-2 bg-white/10 border border-white/20 text-white font-bold rounded-lg text-sm flex items-center gap-1 hover:bg-white/20 transition disabled:opacity-50"
+                >
+                  {isBulkProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
+                  Tailor All Top Jobs
+                </button>
+              </div>
+            </div>
+
+            {/* Job cards */}
+            <div className="divide-y divide-white/5">
+              {scoredJobs.map((job, idx) => {
+                const prog = jobProgress[job.id];
+                const isProcessing = prog && !['idle', 'done', 'error'].includes(prog.status);
+                const isDone = prog?.status === 'done';
+                const isError = prog?.status === 'error';
+                const isExpanded = expandedJob === job.id;
+                const isSelected = selectedJobs.has(job.id);
+
+                return (
+                  <div key={job.id} className={`transition ${isDone ? 'bg-[#81C784]/5' : isError ? 'bg-red-500/5' : 'hover:bg-white/5'}`}>
+                    {/* Main row */}
+                    <div className="px-6 py-4">
+                      <div className="flex items-start gap-4">
+                        {/* Checkbox */}
+                        <button
+                          onClick={() => toggleJobSelection(job.id)}
+                          className="mt-1 shrink-0 text-gray-400 hover:text-white transition"
+                        >
+                          {isSelected ?
+                            <CheckSquare className="w-5 h-5 text-[var(--color-primary)]" /> :
+                            <Square className="w-5 h-5" />
+                          }
+                        </button>
+
+                        {/* Rank number */}
+                        <div className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center text-xs font-bold text-gray-400 shrink-0 mt-0.5">
+                          {idx + 1}
+                        </div>
+
+                        {/* Job info */}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <h3 className="font-bold text-white">{job.title}</h3>
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                              job.source === 'adzuna' ? 'bg-blue-500/20 text-blue-400' : 'bg-sky-500/20 text-sky-400'
+                            }`}>
+                              {job.source}
+                            </span>
+                            {isDone && (
+                              <span className="px-2 py-0.5 rounded bg-[#81C784]/20 text-[#81C784] text-[10px] font-bold">
+                                TAILORED
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-3 text-sm text-gray-400 mt-1">
+                            <span className="flex items-center gap-1">
+                              <Building2 className="w-3.5 h-3.5" /> {job.company}
+                            </span>
+                            <span className="flex items-center gap-1">
+                              <MapPin className="w-3.5 h-3.5" /> {job.location}
+                            </span>
+                            {job.salary !== 'Not specified' && (
+                              <span className="text-[#81C784]">{job.salary}</span>
+                            )}
+                          </div>
+
+                          {/* STEP 2: Dual scores */}
+                          <div className="flex items-center gap-6 mt-3">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs text-gray-500">Current CV Match:</span>
+                              <span className={`text-sm font-bold ${scoreColor(job.cvMatchScore)}`}>
+                                {job.cvMatchScore}%
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <TrendingUp className="w-3.5 h-3.5 text-gray-500" />
+                              <span className="text-xs text-gray-500">Projected After Tailoring:</span>
+                              <span className={`text-sm font-bold ${scoreColor(job.projectedScore)}`}>
+                                ~{job.projectedScore}%
+                              </span>
+                            </div>
+                            {isDone && prog.actualScore !== undefined && (
+                              <div className="flex items-center gap-2">
+                                <CheckCircle2 className="w-3.5 h-3.5 text-[#81C784]" />
+                                <span className="text-xs text-gray-500">Actual:</span>
+                                <span className={`text-sm font-bold ${scoreColor(prog.actualScore)}`}>
+                                  {prog.actualScore}%
+                                </span>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Score bar */}
+                          <div className="mt-2 w-full max-w-xs">
+                            <div className="w-full bg-white/10 rounded-full h-1.5 relative">
+                              {/* Current score bar */}
+                              <div
+                                className={`h-1.5 rounded-full absolute left-0 top-0 ${
+                                  job.cvMatchScore >= 65 ? 'bg-[#81C784]/40' :
+                                  job.cvMatchScore >= 40 ? 'bg-yellow-400/40' :
+                                  'bg-red-400/40'
+                                }`}
+                                style={{ width: `${job.cvMatchScore}%` }}
+                              />
+                              {/* Projected overlay */}
+                              <div
+                                className={`h-1.5 rounded-full absolute left-0 top-0 opacity-30 ${
+                                  job.projectedScore >= 65 ? 'bg-[#81C784]' :
+                                  job.projectedScore >= 40 ? 'bg-yellow-400' :
+                                  'bg-red-400'
+                                }`}
+                                style={{ width: `${isDone && prog.actualScore ? prog.actualScore : job.projectedScore}%` }}
+                              />
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* STEP 3: Action buttons */}
+                        <div className="flex items-center gap-2 shrink-0">
+                          {!isDone && !isProcessing && (
+                            <>
+                              <button
+                                onClick={() => generateForJob(job, 'manual')}
+                                disabled={isAnyProcessRunning && !isBulkProcessing}
+                                className="px-3 py-2 bg-blue-600 text-white font-bold rounded-lg text-xs flex items-center gap-1.5 hover:bg-blue-500 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                                title="Generate tailored CV + cover letter for manual submission"
+                              >
+                                <FileText className="w-3.5 h-3.5" />
+                                Tailor &amp; Download
+                              </button>
+                              <button
+                                onClick={() => generateForJob(job, 'auto')}
+                                disabled={isAnyProcessRunning && !isBulkProcessing}
+                                className="px-3 py-2 bg-[var(--color-primary)] text-black font-bold rounded-lg text-xs flex items-center gap-1.5 hover:bg-yellow-400 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                                title="Generate + prepare for auto-apply (coming soon)"
+                              >
+                                <Zap className="w-3.5 h-3.5" />
+                                Tailor &amp; Auto-Apply
+                              </button>
+                            </>
+                          )}
+
+                          {/* Processing indicator */}
+                          {isProcessing && (
+                            <div className="flex items-center gap-2 px-3 py-2 bg-[var(--color-primary)]/10 border border-[var(--color-primary)]/30 rounded-lg">
+                              <Loader2 className="w-4 h-4 animate-spin text-[var(--color-primary)]" />
+                              <span className="text-xs text-[var(--color-primary)] font-medium">
+                                {genStepLabel[prog!.status]}
+                              </span>
+                            </div>
+                          )}
+
+                          {/* Done indicator */}
+                          {isDone && (
+                            <button
+                              onClick={() => setExpandedJob(isExpanded ? null : job.id)}
+                              className="px-3 py-2 bg-[#81C784]/20 text-[#81C784] font-bold rounded-lg text-xs flex items-center gap-1.5 hover:bg-[#81C784]/30 transition"
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              {prog.originalScore}% → {prog.actualScore}%
+                              {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                            </button>
+                          )}
+
+                          {/* Error indicator */}
+                          {isError && (
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs text-red-400 max-w-[150px] truncate">{prog!.error}</span>
+                              <button
+                                onClick={() => generateForJob(job, 'manual')}
+                                className="px-2 py-1 bg-red-500/20 text-red-400 rounded text-xs font-bold hover:bg-red-500/30 transition"
+                              >
+                                Retry
+                              </button>
+                            </div>
+                          )}
+
+                          {/* External link */}
+                          {job.source_url && (
+                            <a
+                              href={job.source_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="p-2 hover:bg-white/10 rounded-lg transition text-gray-400 hover:text-white"
+                              title="View original posting"
+                            >
+                              <ExternalLink className="w-4 h-4" />
+                            </a>
+                          )}
+
+                          <button
+                            onClick={() => setExpandedJob(isExpanded ? null : job.id)}
+                            className="p-2 hover:bg-white/10 rounded-lg transition text-gray-400"
+                          >
+                            {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* STEP 4: Expanded section — generation progress or results */}
+                    <AnimatePresence>
+                      {isExpanded && (
+                        <motion.div
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: "auto", opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          className="overflow-hidden"
+                        >
+                          <div className="px-6 pb-6 space-y-4">
+                            {/* Job description preview */}
+                            <div className="bg-black/30 rounded-xl p-4">
+                              <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Job Description</h4>
+                              <p className="text-sm text-gray-400 leading-relaxed">
+                                {job.description.slice(0, 600)}{job.description.length > 600 ? '...' : ''}
+                              </p>
+                            </div>
+
+                            {/* Generation progress steps */}
+                            {isProcessing && prog && (
+                              <div className="bg-[var(--color-primary)]/5 border border-[var(--color-primary)]/20 rounded-xl p-4">
+                                <div className="grid grid-cols-4 gap-3">
+                                  {(['analyzing', 'scoring', 'tailoring', 'writing'] as JobGenStatus[]).map((step, si) => {
+                                    const stepLabels = ['Analyzing JD', 'Scoring Match', 'Tailoring CV', 'Writing Cover Letter'];
+                                    const stepOrder: Record<string, number> = { analyzing: 0, scoring: 1, tailoring: 2, writing: 3, done: 4, error: -1, idle: -1 };
+                                    const currentIdx = stepOrder[prog.status] ?? -1;
+                                    const isActive = currentIdx === si;
+                                    const isComplete = currentIdx > si;
+
+                                    return (
+                                      <div key={step} className="flex flex-col items-center gap-2 text-center">
+                                        <div className={`w-8 h-8 rounded-full flex items-center justify-center transition-all ${
+                                          isComplete ? "bg-[#81C784] text-black" :
+                                          isActive ? "bg-[var(--color-primary)] text-black animate-pulse" :
+                                          "bg-white/5 border border-white/10 text-gray-500"
+                                        }`}>
+                                          {isComplete ? <Check className="w-4 h-4" /> : <span className="font-bold text-sm">{si + 1}</span>}
+                                        </div>
+                                        <span className={`text-xs font-semibold ${
+                                          isComplete ? "text-[#81C784]" : isActive ? "text-[var(--color-primary)]" : "text-gray-500"
+                                        }`}>
+                                          {stepLabels[si]}
+                                        </span>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Done: show results */}
+                            {isDone && prog.result && (
+                              <div className="space-y-4">
+                                {/* Score improvement banner */}
+                                <div className="bg-[#81C784]/10 border border-[#81C784]/30 px-4 py-3 rounded-xl flex items-center gap-3">
+                                  <TrendingUp className="w-5 h-5 text-[#81C784]" />
+                                  <span className="text-sm text-[#81C784] font-medium">
+                                    Match improved from {prog.originalScore}% to {prog.actualScore}%
+                                    {prog.result.mode === 'auto' && (
+                                      <span className="ml-2 text-yellow-400">(Auto-apply coming soon — download and submit manually for now)</span>
+                                    )}
+                                  </span>
+                                </div>
+
+                                {/* Documents */}
+                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                                  {/* Tailored CV */}
+                                  <div className="bg-white rounded-xl overflow-hidden">
+                                    <div className="bg-gray-100 p-3 flex justify-between items-center text-black">
+                                      <h4 className="font-bold text-sm flex items-center gap-1">
+                                        <FileText className="w-4 h-4 text-blue-600" />
+                                        Tailored CV
+                                      </h4>
+                                      <div className="flex items-center gap-1">
+                                        <button onClick={() => copyToClipboard(prog.result.tailored_cv, 'cv')} className="p-1.5 hover:bg-gray-200 rounded text-gray-600 text-xs" title="Copy">
+                                          <Copy className="w-3.5 h-3.5" />
+                                        </button>
+                                        <button onClick={() => downloadAsPdf(prog.result.tailored_cv, `CV_${job.company}_${job.title}`)} className="p-1.5 hover:bg-gray-200 rounded text-gray-600 flex items-center gap-0.5 text-xs font-semibold">
+                                          <Download className="w-3.5 h-3.5" /> PDF
+                                        </button>
+                                        <button onClick={() => downloadAsDocx(prog.result.tailored_cv, `CV_${job.company}_${job.title}`)} className="p-1.5 hover:bg-gray-200 rounded text-gray-600 flex items-center gap-0.5 text-xs font-semibold">
+                                          <Download className="w-3.5 h-3.5" /> DOCX
+                                        </button>
+                                      </div>
+                                    </div>
+                                    <div className="p-4 max-h-[400px] overflow-y-auto text-black text-xs font-[ui-monospace,'Cascadia Code','Segoe UI Mono',monospace]">
+                                      <FormattedCV text={prog.result.tailored_cv} />
+                                    </div>
+                                  </div>
+
+                                  {/* Cover Letter */}
+                                  <div className="bg-white rounded-xl overflow-hidden">
+                                    <div className="bg-gray-100 p-3 flex justify-between items-center text-black">
+                                      <h4 className="font-bold text-sm flex items-center gap-1">
+                                        <Navigation className="w-4 h-4 text-amber-600" />
+                                        Cover Letter
+                                      </h4>
+                                      <div className="flex items-center gap-1">
+                                        <button onClick={() => copyToClipboard(prog.result.cover_letter, 'cl')} className="p-1.5 hover:bg-gray-200 rounded text-gray-600 text-xs" title="Copy">
+                                          <Copy className="w-3.5 h-3.5" />
+                                        </button>
+                                        <button onClick={() => downloadAsPdf(prog.result.cover_letter, `CL_${job.company}_${job.title}`)} className="p-1.5 hover:bg-gray-200 rounded text-gray-600 flex items-center gap-0.5 text-xs font-semibold">
+                                          <Download className="w-3.5 h-3.5" /> PDF
+                                        </button>
+                                        <button onClick={() => downloadAsDocx(prog.result.cover_letter, `CL_${job.company}_${job.title}`)} className="p-1.5 hover:bg-gray-200 rounded text-gray-600 flex items-center gap-0.5 text-xs font-semibold">
+                                          <Download className="w-3.5 h-3.5" /> DOCX
+                                        </button>
+                                      </div>
+                                    </div>
+                                    <div className="p-4 max-h-[400px] overflow-y-auto text-black text-sm whitespace-pre-wrap font-sans leading-relaxed">
+                                      {prog.result.cover_letter}
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* Action row */}
+                                <div className="flex items-center justify-between">
+                                  <span className="text-xs text-gray-500">
+                                    Application saved to tracker with {prog.actualScore}% match score.
+                                  </span>
+                                  {job.source_url && (
+                                    <a
+                                      href={job.source_url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="px-4 py-2 bg-[var(--color-primary)] text-black font-bold rounded-lg text-sm flex items-center gap-1.5 hover:bg-yellow-400 transition"
+                                    >
+                                      Apply Now <ArrowRight className="w-4 h-4" />
+                                    </a>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Error state */}
+                            {isError && (
+                              <div className="bg-red-500/10 border border-red-500/30 px-4 py-3 rounded-xl flex items-center justify-between">
+                                <div className="flex items-center gap-2 text-sm text-red-400">
+                                  <AlertCircle className="w-4 h-4" />
+                                  {prog!.error}
+                                </div>
+                                <button
+                                  onClick={() => generateForJob(job, 'manual')}
+                                  className="px-3 py-1.5 bg-red-500/20 text-red-400 rounded-lg text-xs font-bold hover:bg-red-500/30 transition"
+                                >
+                                  Retry
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
       )}
 
       {/* ═══════════════════════════════════════════════════════════ */}
-      {/* AI APPLICATION GENERATOR (Manual)                         */}
+      {/* AI APPLICATION GENERATOR (Manual JD Paste)                */}
       {/* ═══════════════════════════════════════════════════════════ */}
       <div className="bg-white/5 border border-white/10 p-6 md:p-8 rounded-3xl space-y-6">
         <h2 className="text-2xl font-heading font-bold text-white flex items-center gap-2">
           <Sparkles className="text-[var(--color-primary)] w-6 h-6" />
           AI Application Generator
+          <span className="text-sm font-normal text-gray-400 ml-2">Paste a single JD</span>
         </h2>
 
         {error && (
@@ -819,7 +1164,6 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {/* CV Status Indicator */}
         {userProfile?.cv_text ? (
           <div className="flex items-center justify-between bg-white/5 border border-white/10 rounded-xl px-4 py-3">
             <div className="flex items-center gap-2 text-sm">
@@ -899,7 +1243,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* RESULTS DISPLAY */}
+      {/* RESULTS DISPLAY (for manual JD) */}
       {results && (
         <motion.div
           initial={{ opacity: 0, y: 20 }}
@@ -907,7 +1251,6 @@ export default function DashboardPage() {
           className="space-y-6"
         >
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Match Score Card */}
             <div className="bg-white/5 border border-white/10 p-8 rounded-3xl flex flex-col items-center justify-center text-center">
               <h3 className="text-gray-400 font-heading mb-4">Match Score</h3>
               <div className={`w-32 h-32 rounded-full border-8 flex items-center justify-center mb-4 ${
@@ -926,7 +1269,6 @@ export default function DashboardPage() {
               </div>
             </div>
 
-            {/* Assessment Details */}
             <div className="lg:col-span-2 bg-white/5 border border-white/10 p-6 rounded-3xl space-y-4 flex flex-col justify-between">
               <div>
                 <h3 className="text-xl font-heading font-bold text-white mb-3">Strong Matches</h3>
@@ -953,9 +1295,7 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* Docs row */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Tailored CV */}
             <div className="bg-white rounded-2xl overflow-hidden flex flex-col">
               <div className="bg-gray-100 p-4 border-b flex justify-between items-center text-black">
                 <h3 className="font-bold flex items-center gap-2">
@@ -963,22 +1303,13 @@ export default function DashboardPage() {
                   Tailored CV
                 </h3>
                 <div className="flex items-center gap-1">
-                  <button
-                    onClick={() => copyToClipboard(results.tailored_cv, 'cv')}
-                    className="p-2 hover:bg-gray-200 rounded-lg transition text-gray-700" title="Copy"
-                  >
+                  <button onClick={() => copyToClipboard(results.tailored_cv, 'cv')} className="p-2 hover:bg-gray-200 rounded-lg transition text-gray-700" title="Copy">
                     {cvCopied ? <Check className="w-5 h-5 text-green-600" /> : <Copy className="w-5 h-5" />}
                   </button>
-                  <button
-                    onClick={() => downloadAsPdf(results.tailored_cv, 'Tailored_CV')}
-                    className="p-2 hover:bg-gray-200 rounded-lg transition text-gray-700 flex items-center gap-1 text-xs font-semibold" title="Download PDF"
-                  >
+                  <button onClick={() => downloadAsPdf(results.tailored_cv, 'Tailored_CV')} className="p-2 hover:bg-gray-200 rounded-lg transition text-gray-700 flex items-center gap-1 text-xs font-semibold" title="Download PDF">
                     <Download className="w-4 h-4" /> PDF
                   </button>
-                  <button
-                    onClick={() => downloadAsDocx(results.tailored_cv, 'Tailored_CV')}
-                    className="p-2 hover:bg-gray-200 rounded-lg transition text-gray-700 flex items-center gap-1 text-xs font-semibold" title="Download DOCX"
-                  >
+                  <button onClick={() => downloadAsDocx(results.tailored_cv, 'Tailored_CV')} className="p-2 hover:bg-gray-200 rounded-lg transition text-gray-700 flex items-center gap-1 text-xs font-semibold" title="Download DOCX">
                     <Download className="w-4 h-4" /> DOCX
                   </button>
                 </div>
@@ -988,7 +1319,6 @@ export default function DashboardPage() {
               </div>
             </div>
 
-            {/* Cover Letter */}
             <div className="bg-white rounded-2xl overflow-hidden flex flex-col">
               <div className="bg-gray-100 p-4 border-b flex justify-between items-center text-black">
                 <h3 className="font-bold flex items-center gap-2">
@@ -996,22 +1326,13 @@ export default function DashboardPage() {
                   Cover Letter
                 </h3>
                 <div className="flex items-center gap-1">
-                  <button
-                    onClick={() => copyToClipboard(results.cover_letter, 'cl')}
-                    className="p-2 hover:bg-gray-200 rounded-lg transition text-gray-700" title="Copy"
-                  >
+                  <button onClick={() => copyToClipboard(results.cover_letter, 'cl')} className="p-2 hover:bg-gray-200 rounded-lg transition text-gray-700" title="Copy">
                     {clCopied ? <Check className="w-5 h-5 text-green-600" /> : <Copy className="w-5 h-5" />}
                   </button>
-                  <button
-                    onClick={() => downloadAsPdf(results.cover_letter, 'Cover_Letter')}
-                    className="p-2 hover:bg-gray-200 rounded-lg transition text-gray-700 flex items-center gap-1 text-xs font-semibold" title="Download PDF"
-                  >
+                  <button onClick={() => downloadAsPdf(results.cover_letter, 'Cover_Letter')} className="p-2 hover:bg-gray-200 rounded-lg transition text-gray-700 flex items-center gap-1 text-xs font-semibold" title="Download PDF">
                     <Download className="w-4 h-4" /> PDF
                   </button>
-                  <button
-                    onClick={() => downloadAsDocx(results.cover_letter, 'Cover_Letter')}
-                    className="p-2 hover:bg-gray-200 rounded-lg transition text-gray-700 flex items-center gap-1 text-xs font-semibold" title="Download DOCX"
-                  >
+                  <button onClick={() => downloadAsDocx(results.cover_letter, 'Cover_Letter')} className="p-2 hover:bg-gray-200 rounded-lg transition text-gray-700 flex items-center gap-1 text-xs font-semibold" title="Download DOCX">
                     <Download className="w-4 h-4" /> DOCX
                   </button>
                 </div>
@@ -1022,7 +1343,6 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* ATS Score */}
           {atsScore && (
             <div className="bg-[#81C784]/10 border border-[#81C784]/30 p-6 rounded-3xl flex items-center justify-between">
               <div className="flex items-center gap-6">
@@ -1036,7 +1356,6 @@ export default function DashboardPage() {
               </div>
             </div>
           )}
-
         </motion.div>
       )}
 
@@ -1044,7 +1363,7 @@ export default function DashboardPage() {
       {/* APPLICATION TRACKER                                        */}
       {/* ═══════════════════════════════════════════════════════════ */}
       <div className="bg-white/5 border border-white/10 rounded-3xl overflow-hidden">
-        {/* FIX 3: Honest status banner */}
+        {/* Honest status banner */}
         <div className="mx-6 mt-6 mb-0 bg-blue-500/10 border border-blue-500/30 px-4 py-3 rounded-xl flex items-start gap-3">
           <Info className="w-5 h-5 text-blue-400 mt-0.5 shrink-0" />
           <div className="text-sm text-blue-300">
@@ -1089,7 +1408,7 @@ export default function DashboardPage() {
               {applications.length === 0 && !loadingApps ? (
                 <tr>
                   <td colSpan={5} className="px-6 py-8 text-center text-gray-500">
-                    No applications generated yet. Paste a JD above or use automated search to get started!
+                    No applications generated yet. Use &quot;Find Jobs&quot; above or paste a JD to get started!
                   </td>
                 </tr>
               ) : applications.map((app) => (
@@ -1167,7 +1486,7 @@ export default function DashboardPage() {
       </div>
 
       {/* ═══════════════════════════════════════════════════════════ */}
-      {/* VIEW APPLICATION MODAL (FIX 1: Enhanced)                   */}
+      {/* VIEW APPLICATION MODAL                                     */}
       {/* ═══════════════════════════════════════════════════════════ */}
       <AnimatePresence>
         {viewingApp && (
@@ -1185,7 +1504,6 @@ export default function DashboardPage() {
               className="bg-[#1a1a2e] border border-white/10 rounded-3xl max-w-6xl w-full mx-4 overflow-hidden"
               onClick={(e) => e.stopPropagation()}
             >
-              {/* Header */}
               <div className="p-6 border-b border-white/10">
                 <div className="flex justify-between items-start">
                   <div>
@@ -1199,33 +1517,21 @@ export default function DashboardPage() {
                     <span className={`px-3 py-1 rounded-full text-sm font-bold ${statusColors[viewingApp.status] || 'text-gray-300 border-white/10'} bg-white/5 border`}>
                       {statusLabels[viewingApp.status] || viewingApp.status}
                     </span>
-                    <button
-                      onClick={() => setViewingApp(null)}
-                      className="text-gray-400 hover:text-white text-2xl leading-none"
-                    >&times;</button>
+                    <button onClick={() => setViewingApp(null)} className="text-gray-400 hover:text-white text-2xl leading-none">&times;</button>
                   </div>
                 </div>
 
-                {/* Match Score Bar */}
                 <div className="mt-4 flex items-center gap-4">
-                  <div className={`w-16 h-16 rounded-2xl flex items-center justify-center font-extrabold text-2xl ${
-                    viewingApp.match_score >= 70 ? 'bg-[#81C784]/20 text-[#81C784]' :
-                    viewingApp.match_score >= 50 ? 'bg-yellow-400/20 text-yellow-400' :
-                    'bg-red-400/20 text-red-400'
-                  }`}>
+                  <div className={`w-16 h-16 rounded-2xl flex items-center justify-center font-extrabold text-2xl ${scoreBg(viewingApp.match_score)}`}>
                     {viewingApp.match_score}%
                   </div>
                   <div className="flex-1">
                     <div className="text-sm text-gray-300 font-medium mb-1">Match Score</div>
                     <div className="w-full bg-white/10 rounded-full h-2">
-                      <div
-                        className={`h-2 rounded-full transition-all ${
-                          viewingApp.match_score >= 70 ? 'bg-[#81C784]' :
-                          viewingApp.match_score >= 50 ? 'bg-yellow-400' :
-                          'bg-red-400'
-                        }`}
-                        style={{ width: `${viewingApp.match_score}%` }}
-                      />
+                      <div className={`h-2 rounded-full transition-all ${
+                        viewingApp.match_score >= 70 ? 'bg-[#81C784]' :
+                        viewingApp.match_score >= 50 ? 'bg-yellow-400' : 'bg-red-400'
+                      }`} style={{ width: `${viewingApp.match_score}%` }} />
                     </div>
                     <div className="text-xs text-gray-500 mt-1">
                       {viewingApp.match_score >= 70 ? 'Strong match — recommended to apply' :
@@ -1235,7 +1541,6 @@ export default function DashboardPage() {
                   </div>
                 </div>
 
-                {/* "What would be sent" label */}
                 <div className="mt-4 bg-[var(--color-primary)]/10 border border-[var(--color-primary)]/30 px-4 py-2 rounded-lg flex items-center gap-2">
                   <FileText className="w-4 h-4 text-[var(--color-primary)]" />
                   <span className="text-[var(--color-primary)] text-sm font-medium">
@@ -1244,54 +1549,31 @@ export default function DashboardPage() {
                 </div>
               </div>
 
-              {/* Documents */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-0 divide-y lg:divide-y-0 lg:divide-x divide-white/10">
-                {/* Tailored CV */}
                 <div className="p-6">
                   <div className="flex justify-between items-center mb-4">
                     <h4 className="font-bold text-white flex items-center gap-2">
-                      <FileText className="w-4 h-4 text-blue-400" />
-                      Tailored CV
+                      <FileText className="w-4 h-4 text-blue-400" /> Tailored CV
                     </h4>
                     <div className="flex gap-1">
-                      <button
-                        onClick={() => downloadAsPdf(viewingApp.tailored_cv, `CV_${viewingApp.company}_${viewingApp.role}`)}
-                        className="px-3 py-1.5 bg-white/10 rounded-lg text-xs text-gray-300 hover:bg-white/20 flex items-center gap-1 transition"
-                      ><Download className="w-3 h-3" /> PDF</button>
-                      <button
-                        onClick={() => downloadAsDocx(viewingApp.tailored_cv, `CV_${viewingApp.company}_${viewingApp.role}`)}
-                        className="px-3 py-1.5 bg-white/10 rounded-lg text-xs text-gray-300 hover:bg-white/20 flex items-center gap-1 transition"
-                      ><Download className="w-3 h-3" /> DOCX</button>
-                      <button
-                        onClick={() => { navigator.clipboard.writeText(viewingApp.tailored_cv); }}
-                        className="px-3 py-1.5 bg-white/10 rounded-lg text-xs text-gray-300 hover:bg-white/20 flex items-center gap-1 transition"
-                      ><Copy className="w-3 h-3" /> Copy</button>
+                      <button onClick={() => downloadAsPdf(viewingApp.tailored_cv, `CV_${viewingApp.company}_${viewingApp.role}`)} className="px-3 py-1.5 bg-white/10 rounded-lg text-xs text-gray-300 hover:bg-white/20 flex items-center gap-1 transition"><Download className="w-3 h-3" /> PDF</button>
+                      <button onClick={() => downloadAsDocx(viewingApp.tailored_cv, `CV_${viewingApp.company}_${viewingApp.role}`)} className="px-3 py-1.5 bg-white/10 rounded-lg text-xs text-gray-300 hover:bg-white/20 flex items-center gap-1 transition"><Download className="w-3 h-3" /> DOCX</button>
+                      <button onClick={() => navigator.clipboard.writeText(viewingApp.tailored_cv)} className="px-3 py-1.5 bg-white/10 rounded-lg text-xs text-gray-300 hover:bg-white/20 flex items-center gap-1 transition"><Copy className="w-3 h-3" /> Copy</button>
                     </div>
                   </div>
                   <div className="bg-white rounded-xl p-4 max-h-[500px] overflow-y-auto text-black text-xs font-[ui-monospace,'Cascadia Code','Segoe UI Mono',monospace]">
                     <FormattedCV text={viewingApp.tailored_cv} />
                   </div>
                 </div>
-                {/* Cover Letter */}
                 <div className="p-6">
                   <div className="flex justify-between items-center mb-4">
                     <h4 className="font-bold text-white flex items-center gap-2">
-                      <Navigation className="w-4 h-4 text-[var(--color-primary)]" />
-                      Cover Letter
+                      <Navigation className="w-4 h-4 text-[var(--color-primary)]" /> Cover Letter
                     </h4>
                     <div className="flex gap-1">
-                      <button
-                        onClick={() => downloadAsPdf(viewingApp.cover_letter, `CL_${viewingApp.company}_${viewingApp.role}`)}
-                        className="px-3 py-1.5 bg-white/10 rounded-lg text-xs text-gray-300 hover:bg-white/20 flex items-center gap-1 transition"
-                      ><Download className="w-3 h-3" /> PDF</button>
-                      <button
-                        onClick={() => downloadAsDocx(viewingApp.cover_letter, `CL_${viewingApp.company}_${viewingApp.role}`)}
-                        className="px-3 py-1.5 bg-white/10 rounded-lg text-xs text-gray-300 hover:bg-white/20 flex items-center gap-1 transition"
-                      ><Download className="w-3 h-3" /> DOCX</button>
-                      <button
-                        onClick={() => { navigator.clipboard.writeText(viewingApp.cover_letter); }}
-                        className="px-3 py-1.5 bg-white/10 rounded-lg text-xs text-gray-300 hover:bg-white/20 flex items-center gap-1 transition"
-                      ><Copy className="w-3 h-3" /> Copy</button>
+                      <button onClick={() => downloadAsPdf(viewingApp.cover_letter, `CL_${viewingApp.company}_${viewingApp.role}`)} className="px-3 py-1.5 bg-white/10 rounded-lg text-xs text-gray-300 hover:bg-white/20 flex items-center gap-1 transition"><Download className="w-3 h-3" /> PDF</button>
+                      <button onClick={() => downloadAsDocx(viewingApp.cover_letter, `CL_${viewingApp.company}_${viewingApp.role}`)} className="px-3 py-1.5 bg-white/10 rounded-lg text-xs text-gray-300 hover:bg-white/20 flex items-center gap-1 transition"><Download className="w-3 h-3" /> DOCX</button>
+                      <button onClick={() => navigator.clipboard.writeText(viewingApp.cover_letter)} className="px-3 py-1.5 bg-white/10 rounded-lg text-xs text-gray-300 hover:bg-white/20 flex items-center gap-1 transition"><Copy className="w-3 h-3" /> Copy</button>
                     </div>
                   </div>
                   <div className="bg-white rounded-xl p-4 max-h-[500px] overflow-y-auto text-black text-sm whitespace-pre-wrap font-sans leading-relaxed">
@@ -1300,7 +1582,6 @@ export default function DashboardPage() {
                 </div>
               </div>
 
-              {/* Footer actions */}
               <div className="p-6 border-t border-white/10 flex items-center justify-between gap-4">
                 <div className="text-xs text-gray-500">
                   Generated on {new Date(viewingApp.applied_date).toLocaleDateString()}
@@ -1320,10 +1601,7 @@ export default function DashboardPage() {
                       <Check className="w-4 h-4" /> Approve & Prepare to Apply
                     </button>
                   )}
-                  <button
-                    onClick={() => setViewingApp(null)}
-                    className="px-4 py-2 bg-white/10 text-gray-300 font-medium rounded-lg text-sm hover:bg-white/20 transition"
-                  >
+                  <button onClick={() => setViewingApp(null)} className="px-4 py-2 bg-white/10 text-gray-300 font-medium rounded-lg text-sm hover:bg-white/20 transition">
                     Close
                   </button>
                 </div>
@@ -1333,9 +1611,7 @@ export default function DashboardPage() {
         )}
       </AnimatePresence>
 
-      {/* ═══════════════════════════════════════════════════════════ */}
-      {/* POST-APPROVAL POPUP (FIX 4)                                */}
-      {/* ═══════════════════════════════════════════════════════════ */}
+      {/* POST-APPROVAL POPUP */}
       <AnimatePresence>
         {approvedApp && (
           <motion.div
@@ -1359,14 +1635,11 @@ export default function DashboardPage() {
               <p className="text-gray-400 text-sm mb-1">
                 <strong className="text-white">{approvedApp.role}</strong> at <strong className="text-white">{approvedApp.company}</strong>
               </p>
-              <p className="text-gray-500 text-xs mb-6">
-                Your tailored CV and cover letter are ready to submit.
-              </p>
+              <p className="text-gray-500 text-xs mb-6">Your tailored CV and cover letter are ready to submit.</p>
 
               <div className="bg-white/5 border border-white/10 rounded-xl p-4 text-left space-y-3 mb-6">
                 <h4 className="text-sm font-bold text-white flex items-center gap-2">
-                  <Info className="w-4 h-4 text-blue-400" />
-                  Next Steps
+                  <Info className="w-4 h-4 text-blue-400" /> Next Steps
                 </h4>
                 <ol className="text-sm text-gray-300 space-y-2 list-decimal list-inside">
                   <li>Download your tailored CV and cover letter using the buttons below</li>
@@ -1378,42 +1651,23 @@ export default function DashboardPage() {
 
               <div className="flex flex-col gap-3">
                 <div className="flex gap-2 justify-center">
-                  <button
-                    onClick={() => downloadAsPdf(approvedApp.tailored_cv, `CV_${approvedApp.company}_${approvedApp.role}`)}
-                    className="px-4 py-2 bg-white/10 text-gray-300 rounded-lg text-sm flex items-center gap-1 hover:bg-white/20 transition"
-                  >
+                  <button onClick={() => downloadAsPdf(approvedApp.tailored_cv, `CV_${approvedApp.company}_${approvedApp.role}`)} className="px-4 py-2 bg-white/10 text-gray-300 rounded-lg text-sm flex items-center gap-1 hover:bg-white/20 transition">
                     <Download className="w-4 h-4" /> Download CV
                   </button>
-                  <button
-                    onClick={() => downloadAsPdf(approvedApp.cover_letter, `CL_${approvedApp.company}_${approvedApp.role}`)}
-                    className="px-4 py-2 bg-white/10 text-gray-300 rounded-lg text-sm flex items-center gap-1 hover:bg-white/20 transition"
-                  >
+                  <button onClick={() => downloadAsPdf(approvedApp.cover_letter, `CL_${approvedApp.company}_${approvedApp.role}`)} className="px-4 py-2 bg-white/10 text-gray-300 rounded-lg text-sm flex items-center gap-1 hover:bg-white/20 transition">
                     <Download className="w-4 h-4" /> Download Cover Letter
                   </button>
                 </div>
                 {approvedApp.source_url ? (
-                  <a
-                    href={approvedApp.source_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="px-6 py-3 bg-[var(--color-primary)] text-black font-bold rounded-xl flex items-center justify-center gap-2 hover:bg-yellow-400 transition hover:scale-[1.02] active:scale-95"
-                  >
+                  <a href={approvedApp.source_url} target="_blank" rel="noopener noreferrer" className="px-6 py-3 bg-[var(--color-primary)] text-black font-bold rounded-xl flex items-center justify-center gap-2 hover:bg-yellow-400 transition hover:scale-[1.02] active:scale-95">
                     Apply Now <ArrowRight className="w-5 h-5" />
                   </a>
                 ) : (
-                  <button
-                    onClick={() => setApprovedApp(null)}
-                    className="px-6 py-3 bg-[var(--color-primary)] text-black font-bold rounded-xl flex items-center justify-center gap-2 hover:bg-yellow-400 transition"
-                  >
+                  <button onClick={() => setApprovedApp(null)} className="px-6 py-3 bg-[var(--color-primary)] text-black font-bold rounded-xl flex items-center justify-center gap-2 hover:bg-yellow-400 transition">
                     Got It <Check className="w-5 h-5" />
                   </button>
                 )}
-                <button
-                  onClick={() => setApprovedApp(null)}
-                  className="text-gray-500 text-sm hover:text-gray-300 transition"
-                >
-                  Close
-                </button>
+                <button onClick={() => setApprovedApp(null)} className="text-gray-500 text-sm hover:text-gray-300 transition">Close</button>
               </div>
             </motion.div>
           </motion.div>
@@ -1498,7 +1752,6 @@ function FormattedCV({ text }: { text: string }) {
       continue;
     }
 
-    // Before first header: name/subtitle/contact
     if (!currentSection) {
       if (headerIdx === 0 && trimmed === trimmed.toUpperCase() && trimmed.length > 3 && !trimmed.includes('|')) {
         elements.push(
@@ -1522,7 +1775,6 @@ function FormattedCV({ text }: { text: string }) {
       headerIdx++;
     }
 
-    // CORE COMPETENCIES: collect bullets
     if (currentSection === 'CORE COMPETENCIES') {
       if (trimmed.includes('\u2022')) {
         const parts = trimmed.split('\u2022').map((s: string) => s.trim()).filter((s: string) => s.length > 0);
@@ -1538,7 +1790,6 @@ function FormattedCV({ text }: { text: string }) {
       }
     }
 
-    // Date line
     const dateMatch = trimmed.match(DATE_RE);
     if (dateMatch) {
       flushCompetencies();
@@ -1554,7 +1805,6 @@ function FormattedCV({ text }: { text: string }) {
       continue;
     }
 
-    // Year range or single dates
     if (!trimmed.startsWith('\u2022')) {
       const yrMatch = trimmed.match(YEAR_RANGE_RE_DASH);
       const sdMatch = !yrMatch ? trimmed.match(SINGLE_DATE_RE_DASH) : null;
@@ -1575,7 +1825,6 @@ function FormattedCV({ text }: { text: string }) {
       }
     }
 
-    // Bullet
     if (trimmed.startsWith('\u2022')) {
       flushCompetencies();
       elements.push(
@@ -1586,7 +1835,6 @@ function FormattedCV({ text }: { text: string }) {
       continue;
     }
 
-    // Default text
     flushCompetencies();
     elements.push(
       <div key={key} className="leading-relaxed text-gray-800 text-[10.5px]">
