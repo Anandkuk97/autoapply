@@ -6,7 +6,7 @@ import {
   Copy, CheckCircle2, CircleDashed, Briefcase, FileText, Check, Loader2,
   Sparkles, Navigation, AlertCircle, Download, Search, Zap, PlayCircle,
   MapPin, Building2, ExternalLink, ChevronDown, ChevronUp, Eye,
-  StopCircle, DollarSign, SkipForward, XCircle
+  StopCircle, DollarSign, SkipForward, XCircle, Info, ArrowRight
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { downloadAsPdf, downloadAsDocx } from "@/lib/doc-export";
@@ -67,6 +67,7 @@ export default function DashboardPage() {
 
   // Approval confirmation
   const [approvalMessage, setApprovalMessage] = useState("");
+  const [approvedApp, setApprovedApp] = useState<any>(null); // For post-approval popup
 
   const steps = [
     "Analyzing JD",
@@ -399,9 +400,9 @@ export default function DashboardPage() {
     if (!error) {
       setApplications(prev => prev.map(app => app.id === id ? { ...app, status: "Applied" } : app));
       const app = applications.find(a => a.id === id);
-      const email = userProfile?.email || user?.email || "your email";
-      setApprovalMessage(`Application for ${app?.role || "this role"} at ${app?.company || "the company"} approved! Confirmation details sent to ${email}.`);
-      setTimeout(() => setApprovalMessage(""), 8000);
+      if (app) {
+        setApprovedApp({ ...app, status: "Applied" });
+      }
     }
   };
 
@@ -418,8 +419,7 @@ export default function DashboardPage() {
           : app
       )
     );
-    const email = userProfile?.email || user?.email || "your email";
-    setApprovalMessage(`${readyApps.length} applications approved! Confirmation details sent to ${email}.`);
+    setApprovalMessage(`${readyApps.length} applications marked as reviewed. Download your tailored documents and submit them manually to each employer.`);
     setTimeout(() => setApprovalMessage(""), 8000);
   };
 
@@ -455,6 +455,24 @@ export default function DashboardPage() {
 
   const isAnyProcessRunning = isSearching || isAutoApplying || isAutomating || isGenerating;
 
+  // ── FIX 2: Status label mappings ──
+  const statusLabels: Record<string, string> = {
+    "ready": "Ready to Review",
+    "Applied": "Applied \u2713",
+    "Callback": "Callback Received",
+    "Interview": "Interview Scheduled",
+    "Rejected": "Not Selected",
+    "No Response": "Awaiting Response",
+  };
+  const statusColors: Record<string, string> = {
+    "ready": "text-blue-400 border-blue-400/30",
+    "Applied": "text-[#81C784] border-[#81C784]/30",
+    "Callback": "text-emerald-400 border-emerald-400/30",
+    "Interview": "text-yellow-400 border-yellow-400/30",
+    "Rejected": "text-gray-500 border-gray-500/30",
+    "No Response": "text-gray-500 border-gray-500/30",
+  };
+
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-1000 pb-12">
 
@@ -462,7 +480,7 @@ export default function DashboardPage() {
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4 md:gap-6">
         {[
           { label: "Total Applied", value: totalApplied, icon: Briefcase },
-          { label: "Ready to Send", value: readyCount, icon: FileText },
+          { label: "Ready to Review", value: readyCount, icon: FileText },
           { label: "Callbacks", value: callbacks, icon: Navigation },
           { label: "Interviews", value: interviews, icon: CheckCircle2 },
           { label: "Hit Rate", value: `${hitRate}%`, icon: Sparkles }
@@ -489,7 +507,7 @@ export default function DashboardPage() {
             <CheckCircle2 className="w-5 h-5 text-[#81C784] mt-0.5 shrink-0" />
             <div className="flex-1">
               <p className="text-[#81C784] font-medium text-sm">{approvalMessage}</p>
-              <p className="text-gray-500 text-xs mt-1">Actual email notifications will be enabled in a future update.</p>
+              <p className="text-gray-500 text-xs mt-1">Download your documents and submit them on the employer&apos;s website.</p>
             </div>
             <button onClick={() => setApprovalMessage("")} className="text-gray-500 hover:text-white text-lg leading-none">&times;</button>
           </motion.div>
@@ -549,7 +567,7 @@ export default function DashboardPage() {
               },
               {
                 num: 7,
-                text: "Download tailored documents or let us apply for you",
+                text: "Download tailored documents and submit applications manually",
                 done: false,
                 action: null,
                 actionLabel: null,
@@ -661,15 +679,6 @@ export default function DashboardPage() {
           >
             {isSearching ? <Loader2 className="w-5 h-5 animate-spin" /> : <Search className="w-5 h-5" />}
             Find Jobs
-          </button>
-
-          <button
-            onClick={handleAutoGenerate}
-            disabled={isAnyProcessRunning || !userProfile?.cv_text}
-            className="px-6 py-3 bg-blue-600 text-white font-bold rounded-xl flex items-center gap-2 hover:bg-blue-500 transition hover:scale-[1.02] active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {isAutoApplying ? <Loader2 className="w-5 h-5 animate-spin" /> : <Zap className="w-5 h-5" />}
-            Auto-Generate All
           </button>
 
           <button
@@ -1035,6 +1044,16 @@ export default function DashboardPage() {
       {/* APPLICATION TRACKER                                        */}
       {/* ═══════════════════════════════════════════════════════════ */}
       <div className="bg-white/5 border border-white/10 rounded-3xl overflow-hidden">
+        {/* FIX 3: Honest status banner */}
+        <div className="mx-6 mt-6 mb-0 bg-blue-500/10 border border-blue-500/30 px-4 py-3 rounded-xl flex items-start gap-3">
+          <Info className="w-5 h-5 text-blue-400 mt-0.5 shrink-0" />
+          <div className="text-sm text-blue-300">
+            <strong>How it works:</strong> AutoApply generates tailored CVs and cover letters for each job.
+            You still need to <strong>submit applications manually</strong> — download your documents and apply on the employer&apos;s website or job board.
+            Automated submission is planned for a future update.
+          </div>
+        </div>
+
         <div className="p-6 border-b border-white/10 flex justify-between items-center flex-wrap gap-3">
           <h2 className="text-xl font-heading font-bold text-white flex items-center gap-2">
             <Navigation className="text-[var(--color-primary)] w-5 h-5" />
@@ -1093,16 +1112,16 @@ export default function DashboardPage() {
                     <select
                       value={app.status}
                       onChange={(e) => handleStatusChange(app.id, e.target.value)}
-                      className={`bg-black/50 border border-white/10 rounded-lg px-2 py-1 text-sm outline-none focus:border-[var(--color-primary)] ${
-                        app.status === 'ready' ? 'text-[var(--color-primary)] border-[var(--color-primary)]/30' : 'text-gray-300'
+                      className={`bg-black/50 border rounded-lg px-2 py-1 text-sm outline-none focus:border-[var(--color-primary)] ${
+                        statusColors[app.status] || 'text-gray-300 border-white/10'
                       }`}
                     >
-                      <option value="ready">Ready</option>
-                      <option value="Applied">Applied</option>
-                      <option value="Callback">Callback</option>
-                      <option value="Interview">Interview</option>
-                      <option value="Rejected">Rejected</option>
-                      <option value="No Response">No Response</option>
+                      <option value="ready">Ready to Review</option>
+                      <option value="Applied">Applied ✓</option>
+                      <option value="Callback">Callback Received</option>
+                      <option value="Interview">Interview Scheduled</option>
+                      <option value="Rejected">Not Selected</option>
+                      <option value="No Response">Awaiting Response</option>
                     </select>
                   </td>
                   <td className="px-6 py-4 text-gray-500 font-sans">
@@ -1148,7 +1167,7 @@ export default function DashboardPage() {
       </div>
 
       {/* ═══════════════════════════════════════════════════════════ */}
-      {/* VIEW APPLICATION MODAL                                     */}
+      {/* VIEW APPLICATION MODAL (FIX 1: Enhanced)                   */}
       {/* ═══════════════════════════════════════════════════════════ */}
       <AnimatePresence>
         {viewingApp && (
@@ -1156,49 +1175,97 @@ export default function DashboardPage() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/80 z-50 flex items-start justify-center pt-8 pb-8 overflow-y-auto"
+            className="fixed inset-0 bg-black/80 z-50 flex items-start justify-center pt-6 pb-6 overflow-y-auto"
             onClick={() => setViewingApp(null)}
           >
             <motion.div
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-[#1a1a2e] border border-white/10 rounded-3xl max-w-5xl w-full mx-4 overflow-hidden"
+              className="bg-[#1a1a2e] border border-white/10 rounded-3xl max-w-6xl w-full mx-4 overflow-hidden"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="p-6 border-b border-white/10 flex justify-between items-center">
-                <div>
-                  <h3 className="text-xl font-bold text-white">{viewingApp.role}</h3>
-                  <p className="text-gray-400 text-sm">{viewingApp.company} - {viewingApp.location}</p>
+              {/* Header */}
+              <div className="p-6 border-b border-white/10">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <h3 className="text-xl font-bold text-white">{viewingApp.role}</h3>
+                    <p className="text-gray-400 text-sm mt-1">
+                      {viewingApp.company} {viewingApp.location && `\u2022 ${viewingApp.location}`}
+                      {viewingApp.salary && viewingApp.salary !== 'Not specified' && ` \u2022 ${viewingApp.salary}`}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className={`px-3 py-1 rounded-full text-sm font-bold ${statusColors[viewingApp.status] || 'text-gray-300 border-white/10'} bg-white/5 border`}>
+                      {statusLabels[viewingApp.status] || viewingApp.status}
+                    </span>
+                    <button
+                      onClick={() => setViewingApp(null)}
+                      className="text-gray-400 hover:text-white text-2xl leading-none"
+                    >&times;</button>
+                  </div>
                 </div>
-                <div className="flex items-center gap-3">
-                  <span className={`px-3 py-1 rounded-full text-sm font-bold ${
+
+                {/* Match Score Bar */}
+                <div className="mt-4 flex items-center gap-4">
+                  <div className={`w-16 h-16 rounded-2xl flex items-center justify-center font-extrabold text-2xl ${
                     viewingApp.match_score >= 70 ? 'bg-[#81C784]/20 text-[#81C784]' :
                     viewingApp.match_score >= 50 ? 'bg-yellow-400/20 text-yellow-400' :
                     'bg-red-400/20 text-red-400'
                   }`}>
                     {viewingApp.match_score}%
+                  </div>
+                  <div className="flex-1">
+                    <div className="text-sm text-gray-300 font-medium mb-1">Match Score</div>
+                    <div className="w-full bg-white/10 rounded-full h-2">
+                      <div
+                        className={`h-2 rounded-full transition-all ${
+                          viewingApp.match_score >= 70 ? 'bg-[#81C784]' :
+                          viewingApp.match_score >= 50 ? 'bg-yellow-400' :
+                          'bg-red-400'
+                        }`}
+                        style={{ width: `${viewingApp.match_score}%` }}
+                      />
+                    </div>
+                    <div className="text-xs text-gray-500 mt-1">
+                      {viewingApp.match_score >= 70 ? 'Strong match — recommended to apply' :
+                       viewingApp.match_score >= 50 ? 'Moderate match — review before applying' :
+                       'Low match — consider carefully'}
+                    </div>
+                  </div>
+                </div>
+
+                {/* "What would be sent" label */}
+                <div className="mt-4 bg-[var(--color-primary)]/10 border border-[var(--color-primary)]/30 px-4 py-2 rounded-lg flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-[var(--color-primary)]" />
+                  <span className="text-[var(--color-primary)] text-sm font-medium">
+                    Below are the documents tailored for this role — this is what you would send to the employer.
                   </span>
-                  <button
-                    onClick={() => setViewingApp(null)}
-                    className="text-gray-400 hover:text-white text-2xl leading-none"
-                  >&times;</button>
                 </div>
               </div>
+
+              {/* Documents */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-0 divide-y lg:divide-y-0 lg:divide-x divide-white/10">
-                {/* CV */}
+                {/* Tailored CV */}
                 <div className="p-6">
                   <div className="flex justify-between items-center mb-4">
-                    <h4 className="font-bold text-white">Tailored CV</h4>
+                    <h4 className="font-bold text-white flex items-center gap-2">
+                      <FileText className="w-4 h-4 text-blue-400" />
+                      Tailored CV
+                    </h4>
                     <div className="flex gap-1">
                       <button
-                        onClick={() => downloadAsPdf(viewingApp.tailored_cv, `CV_${viewingApp.company}`)}
-                        className="px-2 py-1 bg-white/10 rounded text-xs text-gray-300 hover:bg-white/20"
-                      >PDF</button>
+                        onClick={() => downloadAsPdf(viewingApp.tailored_cv, `CV_${viewingApp.company}_${viewingApp.role}`)}
+                        className="px-3 py-1.5 bg-white/10 rounded-lg text-xs text-gray-300 hover:bg-white/20 flex items-center gap-1 transition"
+                      ><Download className="w-3 h-3" /> PDF</button>
                       <button
-                        onClick={() => downloadAsDocx(viewingApp.tailored_cv, `CV_${viewingApp.company}`)}
-                        className="px-2 py-1 bg-white/10 rounded text-xs text-gray-300 hover:bg-white/20"
-                      >DOCX</button>
+                        onClick={() => downloadAsDocx(viewingApp.tailored_cv, `CV_${viewingApp.company}_${viewingApp.role}`)}
+                        className="px-3 py-1.5 bg-white/10 rounded-lg text-xs text-gray-300 hover:bg-white/20 flex items-center gap-1 transition"
+                      ><Download className="w-3 h-3" /> DOCX</button>
+                      <button
+                        onClick={() => { navigator.clipboard.writeText(viewingApp.tailored_cv); }}
+                        className="px-3 py-1.5 bg-white/10 rounded-lg text-xs text-gray-300 hover:bg-white/20 flex items-center gap-1 transition"
+                      ><Copy className="w-3 h-3" /> Copy</button>
                     </div>
                   </div>
                   <div className="bg-white rounded-xl p-4 max-h-[500px] overflow-y-auto text-black text-xs font-[ui-monospace,'Cascadia Code','Segoe UI Mono',monospace]">
@@ -1208,22 +1275,145 @@ export default function DashboardPage() {
                 {/* Cover Letter */}
                 <div className="p-6">
                   <div className="flex justify-between items-center mb-4">
-                    <h4 className="font-bold text-white">Cover Letter</h4>
+                    <h4 className="font-bold text-white flex items-center gap-2">
+                      <Navigation className="w-4 h-4 text-[var(--color-primary)]" />
+                      Cover Letter
+                    </h4>
                     <div className="flex gap-1">
                       <button
-                        onClick={() => downloadAsPdf(viewingApp.cover_letter, `CL_${viewingApp.company}`)}
-                        className="px-2 py-1 bg-white/10 rounded text-xs text-gray-300 hover:bg-white/20"
-                      >PDF</button>
+                        onClick={() => downloadAsPdf(viewingApp.cover_letter, `CL_${viewingApp.company}_${viewingApp.role}`)}
+                        className="px-3 py-1.5 bg-white/10 rounded-lg text-xs text-gray-300 hover:bg-white/20 flex items-center gap-1 transition"
+                      ><Download className="w-3 h-3" /> PDF</button>
                       <button
-                        onClick={() => downloadAsDocx(viewingApp.cover_letter, `CL_${viewingApp.company}`)}
-                        className="px-2 py-1 bg-white/10 rounded text-xs text-gray-300 hover:bg-white/20"
-                      >DOCX</button>
+                        onClick={() => downloadAsDocx(viewingApp.cover_letter, `CL_${viewingApp.company}_${viewingApp.role}`)}
+                        className="px-3 py-1.5 bg-white/10 rounded-lg text-xs text-gray-300 hover:bg-white/20 flex items-center gap-1 transition"
+                      ><Download className="w-3 h-3" /> DOCX</button>
+                      <button
+                        onClick={() => { navigator.clipboard.writeText(viewingApp.cover_letter); }}
+                        className="px-3 py-1.5 bg-white/10 rounded-lg text-xs text-gray-300 hover:bg-white/20 flex items-center gap-1 transition"
+                      ><Copy className="w-3 h-3" /> Copy</button>
                     </div>
                   </div>
                   <div className="bg-white rounded-xl p-4 max-h-[500px] overflow-y-auto text-black text-sm whitespace-pre-wrap font-sans leading-relaxed">
                     {viewingApp.cover_letter}
                   </div>
                 </div>
+              </div>
+
+              {/* Footer actions */}
+              <div className="p-6 border-t border-white/10 flex items-center justify-between gap-4">
+                <div className="text-xs text-gray-500">
+                  Generated on {new Date(viewingApp.applied_date).toLocaleDateString()}
+                  {viewingApp.source_url && ' \u2022 '}
+                  {viewingApp.source_url && (
+                    <a href={viewingApp.source_url} target="_blank" rel="noopener noreferrer" className="text-[var(--color-primary)] hover:underline">
+                      View original job posting <ExternalLink className="w-3 h-3 inline" />
+                    </a>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  {viewingApp.status === 'ready' && (
+                    <button
+                      onClick={() => { handleApprove(viewingApp.id); setViewingApp(null); }}
+                      className="px-4 py-2 bg-[#81C784] text-black font-bold rounded-lg text-sm flex items-center gap-1 hover:bg-[#66BB6A] transition"
+                    >
+                      <Check className="w-4 h-4" /> Approve & Prepare to Apply
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setViewingApp(null)}
+                    className="px-4 py-2 bg-white/10 text-gray-300 font-medium rounded-lg text-sm hover:bg-white/20 transition"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ═══════════════════════════════════════════════════════════ */}
+      {/* POST-APPROVAL POPUP (FIX 4)                                */}
+      {/* ═══════════════════════════════════════════════════════════ */}
+      <AnimatePresence>
+        {approvedApp && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center"
+            onClick={() => setApprovedApp(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-[#1a1a2e] border border-white/10 rounded-3xl max-w-lg w-full mx-4 p-8 text-center"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="w-16 h-16 bg-[#81C784]/20 rounded-full flex items-center justify-center mx-auto mb-4">
+                <CheckCircle2 className="w-8 h-8 text-[#81C784]" />
+              </div>
+              <h3 className="text-xl font-bold text-white mb-2">Application Approved!</h3>
+              <p className="text-gray-400 text-sm mb-1">
+                <strong className="text-white">{approvedApp.role}</strong> at <strong className="text-white">{approvedApp.company}</strong>
+              </p>
+              <p className="text-gray-500 text-xs mb-6">
+                Your tailored CV and cover letter are ready to submit.
+              </p>
+
+              <div className="bg-white/5 border border-white/10 rounded-xl p-4 text-left space-y-3 mb-6">
+                <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                  <Info className="w-4 h-4 text-blue-400" />
+                  Next Steps
+                </h4>
+                <ol className="text-sm text-gray-300 space-y-2 list-decimal list-inside">
+                  <li>Download your tailored CV and cover letter using the buttons below</li>
+                  <li>Visit the job posting on the employer&apos;s website</li>
+                  <li>Submit your application with the downloaded documents</li>
+                  <li>Update the status in the tracker once you&apos;ve applied</li>
+                </ol>
+              </div>
+
+              <div className="flex flex-col gap-3">
+                <div className="flex gap-2 justify-center">
+                  <button
+                    onClick={() => downloadAsPdf(approvedApp.tailored_cv, `CV_${approvedApp.company}_${approvedApp.role}`)}
+                    className="px-4 py-2 bg-white/10 text-gray-300 rounded-lg text-sm flex items-center gap-1 hover:bg-white/20 transition"
+                  >
+                    <Download className="w-4 h-4" /> Download CV
+                  </button>
+                  <button
+                    onClick={() => downloadAsPdf(approvedApp.cover_letter, `CL_${approvedApp.company}_${approvedApp.role}`)}
+                    className="px-4 py-2 bg-white/10 text-gray-300 rounded-lg text-sm flex items-center gap-1 hover:bg-white/20 transition"
+                  >
+                    <Download className="w-4 h-4" /> Download Cover Letter
+                  </button>
+                </div>
+                {approvedApp.source_url ? (
+                  <a
+                    href={approvedApp.source_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-6 py-3 bg-[var(--color-primary)] text-black font-bold rounded-xl flex items-center justify-center gap-2 hover:bg-yellow-400 transition hover:scale-[1.02] active:scale-95"
+                  >
+                    Apply Now <ArrowRight className="w-5 h-5" />
+                  </a>
+                ) : (
+                  <button
+                    onClick={() => setApprovedApp(null)}
+                    className="px-6 py-3 bg-[var(--color-primary)] text-black font-bold rounded-xl flex items-center justify-center gap-2 hover:bg-yellow-400 transition"
+                  >
+                    Got It <Check className="w-5 h-5" />
+                  </button>
+                )}
+                <button
+                  onClick={() => setApprovedApp(null)}
+                  className="text-gray-500 text-sm hover:text-gray-300 transition"
+                >
+                  Close
+                </button>
               </div>
             </motion.div>
           </motion.div>
