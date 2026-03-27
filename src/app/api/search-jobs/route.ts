@@ -182,24 +182,44 @@ export async function POST(request: Request) {
     }
 
     // Get user preferences
+    console.log('[search-jobs] Looking up preferences for user:', user.id);
+
     const { data: profile, error: profileError } = await supabase
       .from('users')
       .select('target_roles, target_locations, salary_min, salary_max, excluded_companies')
       .eq('id', user.id)
       .single();
 
+    console.log('[search-jobs] Profile query result:', { profile, error: profileError });
+
     if (profileError || !profile) {
+      // If row doesn't exist, try creating it
+      if (profileError?.code === 'PGRST116') {
+        console.log('[search-jobs] User row not found, creating it...');
+        await supabase.from('users').upsert({
+          id: user.id,
+          email: user.email,
+        }, { onConflict: 'id' });
+      }
       return NextResponse.json(
-        { error: 'Profile not found. Please set your job preferences first.' },
+        { error: 'Profile not found. Please set your job preferences in the Preferences page first.' },
         { status: 404 }
       );
     }
 
     const { target_roles, target_locations, salary_min, salary_max, excluded_companies } = profile;
 
+    console.log('[search-jobs] User preferences:', {
+      target_roles,
+      target_locations,
+      salary_min,
+      salary_max,
+      excluded_companies
+    });
+
     if (!target_roles?.length || !target_locations?.length) {
       return NextResponse.json(
-        { error: 'Please set target roles and locations in Preferences before searching.' },
+        { error: `Please set target roles and locations in Preferences before searching. Current: roles=${JSON.stringify(target_roles)}, locations=${JSON.stringify(target_locations)}` },
         { status: 400 }
       );
     }

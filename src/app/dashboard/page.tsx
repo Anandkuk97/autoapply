@@ -93,6 +93,13 @@ export default function DashboardPage() {
       if (!appsResult.error && appsResult.data) {
         setApplications(appsResult.data);
       }
+      console.log("[dashboard] Profile fetch result:", {
+        error: profileResult.error,
+        data: profileResult.data,
+        userId: authUser.id,
+        target_roles: profileResult.data?.target_roles,
+        target_locations: profileResult.data?.target_locations
+      });
       if (!profileResult.error && profileResult.data) {
         setUserProfile(profileResult.data);
       }

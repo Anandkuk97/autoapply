@@ -133,15 +133,16 @@ export default function ProfilePage() {
          return;
       }
 
-      // Save to users table
+      // Save to users table (upsert to create row if missing)
       const { error: dbError } = await supabase
         .from("users")
-        .update({
+        .upsert({
+          id: user.id,
+          email: user.email,
           name: parsedData.fullName,
           cv_text: parsedData.rawCvText,
           cv_parsed_json: parsedData
-        })
-        .eq("id", user.id);
+        }, { onConflict: "id" });
 
       if (dbError) throw dbError;
 
