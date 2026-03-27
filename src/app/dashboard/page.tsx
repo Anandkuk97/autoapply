@@ -77,31 +77,31 @@ export default function DashboardPage() {
     if (authUser) setUser(authUser);
 
     if (authUser) {
-      const [appsResult, profileResult] = await Promise.all([
+      // Fetch applications (client-side) and profile (server-side to bypass RLS) in parallel
+      const [appsResult, profileRes] = await Promise.all([
         supabase
           .from("applications")
           .select("*")
           .eq("user_id", authUser.id)
           .order("applied_date", { ascending: false }),
-        supabase
-          .from("users")
-          .select("name, cv_text, cv_parsed_json, target_roles, target_locations")
-          .eq("id", authUser.id)
-          .single()
+        fetch("/api/get-profile").then(r => r.json())
       ]);
 
       if (!appsResult.error && appsResult.data) {
         setApplications(appsResult.data);
       }
-      console.log("[dashboard] Profile fetch result:", {
-        error: profileResult.error,
-        data: profileResult.data,
-        userId: authUser.id,
-        target_roles: profileResult.data?.target_roles,
-        target_locations: profileResult.data?.target_locations
-      });
-      if (!profileResult.error && profileResult.data) {
-        setUserProfile(profileResult.data);
+
+      console.log("[dashboard] Profile API result:", profileRes);
+      if (profileRes.profile) {
+        setUserProfile(profileRes.profile);
+        console.log("[dashboard] Profile loaded:", {
+          name: profileRes.profile.name,
+          hasCv: !!profileRes.profile.cv_text,
+          target_roles: profileRes.profile.target_roles,
+          target_locations: profileRes.profile.target_locations
+        });
+      } else {
+        console.warn("[dashboard] No profile found for user:", authUser.id);
       }
     }
     setLoadingApps(false);

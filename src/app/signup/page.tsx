@@ -31,16 +31,25 @@ export default function SignupPage() {
       if (authError) throw authError;
 
       if (authData.user) {
-        // Insert into public users table
-        const { error: dbError } = await supabase.from('users').insert({
-          id: authData.user.id,
-          name,
-          email
-        });
-        
-        if (dbError) {
-          console.error("Error creating user profile:", dbError);
-          // Don't throw here to avoid blocking login if RLS blocks it
+        // Create user row via server API (bypasses RLS)
+        try {
+          const createRes = await fetch("/api/create-user", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              id: authData.user.id,
+              name,
+              email
+            }),
+          });
+          const createResult = await createRes.json();
+          console.log("[signup] Create user result:", createResult);
+          if (!createRes.ok) {
+            console.error("[signup] Failed to create user row:", createResult.error);
+          }
+        } catch (err) {
+          console.error("[signup] Error creating user row:", err);
+          // Don't block navigation
         }
 
         router.push("/dashboard");

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
+import { createAdminClient } from '@/utils/supabase/admin';
 
 interface JobListing {
   id: string;
@@ -181,22 +182,23 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // Get user preferences
-    console.log('[search-jobs] Looking up preferences for user:', user.id);
+    // Get user preferences using admin client to bypass RLS
+    console.log('[search-jobs] Looking up preferences for user:', user.id, user.email);
 
-    const { data: profile, error: profileError } = await supabase
+    const admin = createAdminClient();
+    const { data: profile, error: profileError } = await admin
       .from('users')
       .select('target_roles, target_locations, salary_min, salary_max, excluded_companies')
       .eq('id', user.id)
       .single();
 
-    console.log('[search-jobs] Profile query result:', { profile, error: profileError });
+    console.log('[search-jobs] Profile query result:', JSON.stringify({ profile, error: profileError }));
 
     if (profileError || !profile) {
       // If row doesn't exist, try creating it
       if (profileError?.code === 'PGRST116') {
         console.log('[search-jobs] User row not found, creating it...');
-        await supabase.from('users').upsert({
+        await admin.from('users').upsert({
           id: user.id,
           email: user.email,
         }, { onConflict: 'id' });
@@ -257,7 +259,7 @@ export async function POST(request: Request) {
         posted_date: job.posted_date,
       }));
 
-      const { error: insertError } = await supabase
+      const { error: insertError } = await admin
         .from('job_listings')
         .upsert(rows, { onConflict: 'source_url', ignoreDuplicates: true });
 

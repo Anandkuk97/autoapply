@@ -61,13 +61,9 @@ export default function PreferencesPage() {
       if (!authUser) return;
       setUser(authUser);
 
-      // Load current preferences + profiles in parallel
-      const [prefsResult, profilesResult] = await Promise.all([
-        supabase
-          .from("users")
-          .select("target_roles, target_locations, salary_min, salary_max, work_type, excluded_companies")
-          .eq("id", authUser.id)
-          .single(),
+      // Load current preferences via server API (bypasses RLS) + profiles in parallel
+      const [profileRes, profilesResult] = await Promise.all([
+        fetch("/api/get-profile").then(r => r.json()),
         supabase
           .from("preference_profiles")
           .select("*")
@@ -75,9 +71,11 @@ export default function PreferencesPage() {
           .order("created_at", { ascending: false })
       ]);
 
-      // Load current preferences
-      if (!prefsResult.error && prefsResult.data) {
-        const data = prefsResult.data;
+      console.log("[preferences] Profile API result:", profileRes);
+
+      // Load current preferences from API response
+      if (profileRes.profile) {
+        const data = profileRes.profile;
         setTargetRoles(data.target_roles || []);
         setTargetLocations(data.target_locations || []);
         setSalaryMin(data.salary_min ? data.salary_min.toString() : "");
@@ -93,7 +91,7 @@ export default function PreferencesPage() {
 
       // Build recent suggestions from saved profiles + current prefs
       buildRecentSuggestions(
-        prefsResult.data,
+        profileRes.profile,
         profilesResult.data || []
       );
     } catch (err: any) {
@@ -131,19 +129,14 @@ export default function PreferencesPage() {
     );
   };
 
-  // ── Save current preferences (upsert to fix missing row bug) ──
+  // ── Save current preferences via server API (bypasses RLS) ──
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
     setError("");
 
     try {
-      const { data: { user: authUser } } = await supabase.auth.getUser();
-      if (!authUser) throw new Error("Not authenticated");
-
       const payload = {
-        id: authUser.id,
-        email: authUser.email,
         target_roles: targetRoles,
         target_locations: targetLocations,
         salary_min: salaryMin ? parseInt(salaryMin) : null,
@@ -152,16 +145,20 @@ export default function PreferencesPage() {
         excluded_companies: excludedCompanies
       };
 
-      console.log("[preferences] Saving with upsert:", JSON.stringify(payload, null, 2));
+      console.log("[preferences] Saving via API:", JSON.stringify(payload, null, 2));
 
-      const { error: updateError, data: upsertData } = await supabase
-        .from("users")
-        .upsert(payload, { onConflict: "id" })
-        .select();
+      const res = await fetch("/api/save-preferences", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
 
-      console.log("[preferences] Upsert result:", { error: updateError, data: upsertData });
+      const result = await res.json();
+      console.log("[preferences] API response:", result);
 
-      if (updateError) throw updateError;
+      if (!res.ok) {
+        throw new Error(result.error || "Failed to save preferences");
+      }
 
       // Update recent suggestions
       buildRecentSuggestions(

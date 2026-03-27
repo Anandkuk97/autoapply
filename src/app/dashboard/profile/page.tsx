@@ -125,26 +125,24 @@ export default function ProfilePage() {
     e.preventDefault();
     setIsSaving(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-         // Local simulation success for disconnected testing
-         console.warn("No active user, simulating save");
-         setSuccess(true);
-         return;
-      }
+      console.log("[profile] Saving via API, name:", parsedData.fullName);
 
-      // Save to users table (upsert to create row if missing)
-      const { error: dbError } = await supabase
-        .from("users")
-        .upsert({
-          id: user.id,
-          email: user.email,
+      const res = await fetch("/api/save-profile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
           name: parsedData.fullName,
           cv_text: parsedData.rawCvText,
           cv_parsed_json: parsedData
-        }, { onConflict: "id" });
+        }),
+      });
 
-      if (dbError) throw dbError;
+      const result = await res.json();
+      console.log("[profile] API response:", result);
+
+      if (!res.ok) {
+        throw new Error(result.error || "Failed to save profile");
+      }
 
       setSuccess(true);
     } catch (err: any) {

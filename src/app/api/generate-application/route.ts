@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
-import { createClient } from '@/utils/supabase/server';
+import { createAdminClient } from '@/utils/supabase/admin';
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY || '',
@@ -14,15 +14,18 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
-    const supabase = await createClient();
-    const { data: userProfile, error: dbError } = await supabase
+    // Use admin client to bypass RLS
+    const admin = createAdminClient();
+    const { data: userProfile, error: dbError } = await admin
       .from('users')
       .select('name, email, cv_text, cv_parsed_json')
       .eq('id', user_id)
       .single();
 
+    console.log('[generate-application] User lookup:', { userId: user_id, found: !!userProfile, error: dbError?.message });
+
     if (dbError || !userProfile) {
-      return NextResponse.json({ error: 'User profile not found' }, { status: 404 });
+      return NextResponse.json({ error: 'User profile not found. Please upload your CV first.' }, { status: 404 });
     }
 
     // Step 1: JD Analyzer
