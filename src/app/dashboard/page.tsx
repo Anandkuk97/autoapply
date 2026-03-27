@@ -1,13 +1,14 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import {
   Copy, CheckCircle2, CircleDashed, Briefcase, FileText, Check, Loader2,
   Sparkles, Navigation, AlertCircle, Download, Search, Zap, PlayCircle,
   MapPin, Building2, ExternalLink, ChevronDown, ChevronUp, Eye,
   StopCircle, DollarSign, SkipForward, XCircle, Info, ArrowRight,
-  Square, CheckSquare, TrendingUp
+  Square, CheckSquare, TrendingUp, Mail, MoreVertical
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { downloadAsPdf, downloadAsDocx } from "@/lib/doc-export";
@@ -118,6 +119,7 @@ function scoreBorder(score: number): string {
 }
 
 export default function DashboardPage() {
+  const router = useRouter();
   const [applications, setApplications] = useState<any[]>([]);
   const [loadingApps, setLoadingApps] = useState(true);
   const [user, setUser] = useState<any>(null);
@@ -153,6 +155,19 @@ export default function DashboardPage() {
   // Approval confirmation
   const [approvalMessage, setApprovalMessage] = useState("");
   const [approvedApp, setApprovedApp] = useState<any>(null);
+
+  // Action menu state
+  const [actionMenuOpen, setActionMenuOpen] = useState<string | null>(null);
+
+  // Email apply modal
+  const [emailApplyApp, setEmailApplyApp] = useState<any>(null);
+  const [emailRecipient, setEmailRecipient] = useState("");
+  const [sendingEmail, setSendingEmail] = useState(false);
+  const [emailSentFor, setEmailSentFor] = useState<string | null>(null);
+
+  // Bulk operations
+  const [bulkEmailProgress, setBulkEmailProgress] = useState("");
+  const [bulkOpenProgress, setBulkOpenProgress] = useState("");
 
   const steps = [
     "Analyzing JD",
@@ -519,6 +534,64 @@ export default function DashboardPage() {
     );
     setApprovalMessage(`${readyApps.length} applications marked as reviewed. Download your tailored documents and submit them manually to each employer.`);
     setTimeout(() => setApprovalMessage(""), 8000);
+  };
+
+  // ── Email Apply (single) ──
+  const handleEmailApply = async (appId: string, recipientEmail: string) => {
+    setSendingEmail(true);
+    try {
+      const res = await fetch("/api/apply-email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ application_id: appId, recipient_email: recipientEmail }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Failed to send email");
+      }
+      const data = await res.json();
+      setApplications(prev => prev.map(a => a.id === appId ? { ...a, status: "Applied" } : a));
+      setEmailSentFor(appId);
+      setApprovalMessage(`Email sent to ${recipientEmail} with your tailored CV for ${emailApplyApp?.role || 'this role'}.`);
+      setTimeout(() => setApprovalMessage(""), 8000);
+      setEmailApplyApp(null);
+      setEmailRecipient("");
+    } catch (err: any) {
+      setApprovalMessage(`Failed to send email: ${err.message}`);
+      setTimeout(() => setApprovalMessage(""), 8000);
+    } finally {
+      setSendingEmail(false);
+    }
+  };
+
+  // ── Mark as Applied (manual) ──
+  const handleMarkApplied = async (id: string) => {
+    const { error } = await supabase
+      .from("applications")
+      .update({ status: "Applied", applied_date: new Date().toISOString() })
+      .eq("id", id);
+    if (!error) {
+      setApplications(prev => prev.map(a => a.id === id ? { ...a, status: "Applied" } : a));
+      setApprovalMessage("Marked as applied.");
+      setTimeout(() => setApprovalMessage(""), 5000);
+    }
+    setActionMenuOpen(null);
+  };
+
+  // ── Bulk: Open All Job Links ──
+  const handleOpenAllLinks = () => {
+    const readyApps = applications.filter(a => (a.status === "ready" || a.status === "Applied") && a.source_url);
+    const toOpen = readyApps.slice(0, 10);
+    setBulkOpenProgress(`Opening ${toOpen.length} job links...`);
+    toOpen.forEach((app, i) => {
+      setTimeout(() => {
+        window.open(app.source_url, '_blank');
+        setBulkOpenProgress(`Opened ${i + 1} of ${toOpen.length} links`);
+        if (i === toOpen.length - 1) {
+          setTimeout(() => setBulkOpenProgress(""), 3000);
+        }
+      }, i * 500);
+    });
   };
 
   const handleStatusChange = async (id: string, newStatus: string) => {
@@ -1411,15 +1484,29 @@ export default function DashboardPage() {
               </span>
             )}
           </h2>
-          {approveAllCount > 0 && (
-            <button
-              onClick={handleApproveAll}
-              className="px-4 py-2 bg-[#81C784] text-black font-bold rounded-lg text-sm flex items-center gap-1 hover:bg-[#66BB6A] transition"
-            >
-              <Check className="w-4 h-4" />
-              Approve All 70%+ ({approveAllCount})
-            </button>
-          )}
+          <div className="flex items-center gap-2 flex-wrap">
+            {approveAllCount > 0 && (
+              <button
+                onClick={handleApproveAll}
+                className="px-3 py-1.5 bg-[#81C784] text-black font-bold rounded-lg text-xs flex items-center gap-1 hover:bg-[#66BB6A] transition"
+              >
+                <Check className="w-3.5 h-3.5" />
+                Approve All 70%+ ({approveAllCount})
+              </button>
+            )}
+            {applications.filter(a => a.source_url && (a.status === 'ready' || a.status === 'Applied')).length > 0 && (
+              <button
+                onClick={handleOpenAllLinks}
+                className="px-3 py-1.5 bg-white/10 border border-white/20 text-white font-bold rounded-lg text-xs flex items-center gap-1 hover:bg-white/20 transition"
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+                Open All Job Links
+              </button>
+            )}
+            {bulkOpenProgress && (
+              <span className="text-xs text-[var(--color-primary)]">{bulkOpenProgress}</span>
+            )}
+          </div>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm text-gray-300 min-w-[700px]">
@@ -1475,7 +1562,7 @@ export default function DashboardPage() {
                     {new Date(app.applied_date).toLocaleDateString()}
                   </td>
                   <td className="px-6 py-4">
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-1 relative">
                       {app.tailored_cv && (
                         <button
                           onClick={() => setViewingApp(viewingApp?.id === app.id ? null : app)}
@@ -1485,13 +1572,38 @@ export default function DashboardPage() {
                           <Eye className="w-4 h-4" />
                         </button>
                       )}
-                      {app.status === 'ready' && (
-                        <button
-                          onClick={() => handleApprove(app.id)}
-                          className="px-2 py-1 bg-[#81C784]/20 text-[#81C784] rounded text-xs font-bold hover:bg-[#81C784]/30 transition"
-                        >
-                          Approve
-                        </button>
+                      {/* Action dropdown trigger */}
+                      {app.tailored_cv && (
+                        <div className="relative">
+                          <button
+                            onClick={() => setActionMenuOpen(actionMenuOpen === app.id ? null : app.id)}
+                            className="px-2 py-1 bg-[var(--color-primary)]/20 text-[var(--color-primary)] rounded text-xs font-bold hover:bg-[var(--color-primary)]/30 transition flex items-center gap-1"
+                          >
+                            Apply <ChevronDown className="w-3 h-3" />
+                          </button>
+                          {actionMenuOpen === app.id && (
+                            <div className="absolute right-0 top-full mt-1 bg-[#1a1a2e] border border-white/20 rounded-xl shadow-2xl z-20 w-52 py-1 overflow-hidden">
+                              <button
+                                onClick={() => { setEmailApplyApp(app); setActionMenuOpen(null); }}
+                                className="w-full px-4 py-2.5 text-left text-sm text-gray-300 hover:bg-white/10 flex items-center gap-2 transition"
+                              >
+                                <Mail className="w-4 h-4 text-blue-400" /> Apply via Email
+                              </button>
+                              <button
+                                onClick={() => { router.push(`/dashboard/apply/${app.id}`); setActionMenuOpen(null); }}
+                                className="w-full px-4 py-2.5 text-left text-sm text-gray-300 hover:bg-white/10 flex items-center gap-2 transition"
+                              >
+                                <ExternalLink className="w-4 h-4 text-[var(--color-primary)]" /> Open &amp; Apply Manually
+                              </button>
+                              <button
+                                onClick={() => handleMarkApplied(app.id)}
+                                className="w-full px-4 py-2.5 text-left text-sm text-gray-300 hover:bg-white/10 flex items-center gap-2 transition"
+                              >
+                                <CheckCircle2 className="w-4 h-4 text-[#81C784]" /> Mark as Applied
+                              </button>
+                            </div>
+                          )}
+                        </div>
                       )}
                       {app.source_url && (
                         <a
@@ -1697,6 +1809,74 @@ export default function DashboardPage() {
                 )}
                 <button onClick={() => setApprovedApp(null)} className="text-gray-500 text-sm hover:text-gray-300 transition">Close</button>
               </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* EMAIL APPLY MODAL */}
+      <AnimatePresence>
+        {emailApplyApp && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center"
+            onClick={() => { setEmailApplyApp(null); setEmailRecipient(""); }}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-[#1a1a2e] border border-white/10 rounded-3xl max-w-md w-full mx-4 p-6"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h3 className="text-lg font-bold text-white mb-1 flex items-center gap-2">
+                <Mail className="w-5 h-5 text-blue-400" /> Apply via Email
+              </h3>
+              <p className="text-gray-400 text-sm mb-4">
+                {emailApplyApp.role} at {emailApplyApp.company}
+              </p>
+
+              {emailSentFor === emailApplyApp.id ? (
+                <div className="bg-[#81C784]/10 border border-[#81C784]/30 px-4 py-3 rounded-xl flex items-center gap-2 mb-4">
+                  <CheckCircle2 className="w-5 h-5 text-[#81C784]" />
+                  <span className="text-[#81C784] text-sm font-medium">Email sent successfully!</span>
+                </div>
+              ) : (
+                <>
+                  <div className="mb-4">
+                    <label className="block text-sm text-gray-300 mb-1">Recipient Email (HR / Hiring Manager)</label>
+                    <input
+                      type="email"
+                      value={emailRecipient}
+                      onChange={e => setEmailRecipient(e.target.value)}
+                      placeholder="hr@company.com"
+                      className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-2.5 text-white text-sm focus:border-[var(--color-primary)] focus:ring-1 focus:ring-[var(--color-primary)] outline-none transition"
+                      autoFocus
+                    />
+                  </div>
+                  <p className="text-[11px] text-gray-600 mb-4">
+                    Your cover letter will be sent as the email body, with your tailored CV details included. Reply-to will be set to your email address.
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => handleEmailApply(emailApplyApp.id, emailRecipient)}
+                      disabled={sendingEmail || !emailRecipient.trim()}
+                      className="flex-1 px-4 py-2.5 bg-blue-600 text-white font-bold rounded-xl flex items-center justify-center gap-2 hover:bg-blue-500 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {sendingEmail ? <Loader2 className="w-4 h-4 animate-spin" /> : <Mail className="w-4 h-4" />}
+                      Send Application
+                    </button>
+                    <button
+                      onClick={() => { setEmailApplyApp(null); setEmailRecipient(""); }}
+                      className="px-4 py-2.5 bg-white/10 text-gray-300 rounded-xl hover:bg-white/20 transition"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </>
+              )}
             </motion.div>
           </motion.div>
         )}
