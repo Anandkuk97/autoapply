@@ -5,7 +5,8 @@ import { supabase } from "@/lib/supabase";
 import {
   Copy, CheckCircle2, CircleDashed, Briefcase, FileText, Check, Loader2,
   Sparkles, Navigation, AlertCircle, Download, Search, Zap, PlayCircle,
-  MapPin, Building2, ExternalLink, ChevronDown, ChevronUp, Eye
+  MapPin, Building2, ExternalLink, ChevronDown, ChevronUp, Eye,
+  StopCircle, DollarSign, SkipForward, XCircle
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { downloadAsPdf, downloadAsDocx } from "@/lib/doc-export";
@@ -47,10 +48,14 @@ export default function DashboardPage() {
   const [searchError, setSearchError] = useState("");
   const [searchCriteria, setSearchCriteria] = useState<any>(null);
 
-  // Auto-Apply States
+  // Auto-Apply States (SSE-based)
   const [isAutoApplying, setIsAutoApplying] = useState(false);
   const [autoProgress, setAutoProgress] = useState("");
+  const [autoProgressDetail, setAutoProgressDetail] = useState<{
+    current: number; total: number; job_title: string; company: string; match_score?: number;
+  } | null>(null);
   const [autoResults, setAutoResults] = useState<any>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   // Automation (full pipeline) States
   const [isAutomating, setIsAutomating] = useState(false);
@@ -202,35 +207,143 @@ export default function DashboardPage() {
     }
   };
 
-  // ── Auto-Generate All ──
-  const handleAutoGenerate = async () => {
-    setIsAutoApplying(true);
-    setAutoProgress("Starting auto-generation pipeline...");
+  // ── SSE Auto-Apply consumer ──
+  const runAutoApplySSE = async () => {
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     setAutoResults(null);
+    setAutoProgressDetail(null);
 
     try {
       const res = await fetch("/api/auto-apply", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
       });
 
       if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || "Auto-apply failed");
+        // Non-SSE error (auth, missing CV, etc)
+        const errText = await res.text();
+        try {
+          const errJson = JSON.parse(errText);
+          throw new Error(errJson.error || "Auto-apply failed");
+        } catch {
+          throw new Error(errText.slice(0, 200) || "Auto-apply failed");
+        }
       }
 
-      const data = await res.json();
-      setAutoResults(data);
-      setAutoProgress("");
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error("No response stream");
 
-      // Refresh applications list
-      await fetchData();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+
+        // Parse SSE events from buffer
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || ""; // Keep incomplete line in buffer
+
+        let currentEvent = "";
+        for (const line of lines) {
+          if (line.startsWith("event: ")) {
+            currentEvent = line.slice(7).trim();
+          } else if (line.startsWith("data: ") && currentEvent) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              handleSSEEvent(currentEvent, data);
+            } catch {
+              console.warn("[dashboard] Failed to parse SSE data:", line);
+            }
+            currentEvent = "";
+          }
+        }
+      }
     } catch (err: any) {
-      setSearchError(err.message);
-      setAutoProgress("");
+      if (err.name === "AbortError") {
+        setAutoProgress("Pipeline stopped by user.");
+      } else {
+        setSearchError(err.message);
+        setAutoProgress("");
+      }
     } finally {
+      abortControllerRef.current = null;
       setIsAutoApplying(false);
+      setIsAutomating(false);
+      setAutoProgressDetail(null);
     }
+  };
+
+  const handleSSEEvent = (event: string, data: any) => {
+    switch (event) {
+      case "progress":
+        setAutoProgress(data.message);
+        break;
+      case "job_start":
+        setAutoProgressDetail({
+          current: data.current,
+          total: data.total,
+          job_title: data.job_title,
+          company: data.company,
+        });
+        setAutoProgress(`Generating application ${data.current} of ${data.total}...`);
+        break;
+      case "job_retry":
+        setAutoProgress(`Rate limited — retrying ${data.job_title} at ${data.company} in 10s...`);
+        break;
+      case "job_complete":
+        // Add the new application to the list immediately
+        if (data.application) {
+          setApplications(prev => [data.application, ...prev]);
+        }
+        setAutoProgressDetail(prev => prev ? { ...prev, match_score: data.match_score } : null);
+        setAutoProgress(
+          `Generated: ${data.job_title} at ${data.company} (${data.match_score}% match)`
+        );
+        break;
+      case "job_skipped":
+        setAutoProgress(
+          `Skipped: ${data.job_title} at ${data.company} (${data.match_score}% — below threshold)`
+        );
+        break;
+      case "job_error":
+        setAutoProgress(`Error: ${data.job_title} at ${data.company} — ${data.error}`);
+        break;
+      case "cancelled":
+        setAutoProgress(`Stopped: ${data.total_processed} processed, ${data.total_generated} generated.`);
+        break;
+      case "complete":
+        setAutoResults(data);
+        setAutoProgress("");
+        setAutoProgressDetail(null);
+        break;
+      case "error":
+        setSearchError(data.message);
+        setAutoProgress("");
+        setAutoProgressDetail(null);
+        break;
+    }
+  };
+
+  // ── Stop button ──
+  const handleStopPipeline = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+  };
+
+  // ── Auto-Generate All ──
+  const handleAutoGenerate = async () => {
+    setIsAutoApplying(true);
+    setSearchError("");
+    setAutoProgress("Starting auto-generation pipeline...");
+    await runAutoApplySSE();
   };
 
   // ── Full Automation Pipeline ──
@@ -261,30 +374,14 @@ export default function DashboardPage() {
         return;
       }
 
-      setAutomationStep(`Found ${searchData.jobs.length} jobs. Generating applications...`);
+      setAutomationStep(`Found ${searchData.jobs.length} jobs. Starting generation...`);
 
-      // Step 2: Auto-apply
-      const applyRes = await fetch("/api/auto-apply", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-      });
-
-      if (!applyRes.ok) {
-        const err = await applyRes.json();
-        throw new Error(err.error || "Auto-apply failed");
-      }
-
-      const applyData = await applyRes.json();
-      setAutoResults(applyData);
-      setAutomationStep(
-        `Done! Generated ${applyData.total_generated} applications from ${applyData.total_found} jobs (${applyData.total_qualified} qualified).`
-      );
-
-      await fetchData();
+      // Step 2: Auto-apply via SSE
+      setAutoProgress("Connecting to generation pipeline...");
+      await runAutoApplySSE();
     } catch (err: any) {
       setAutomationStep("");
       setSearchError(err.message);
-    } finally {
       setIsAutomating(false);
     }
   };
@@ -408,13 +505,39 @@ export default function DashboardPage() {
 
         {/* Progress indicator */}
         {(isSearching || isAutoApplying || isAutomating) && (
-          <div className="bg-[var(--color-primary)]/10 border border-[var(--color-primary)]/30 px-4 py-3 rounded-xl flex items-center gap-3">
-            <Loader2 className="w-5 h-5 animate-spin text-[var(--color-primary)]" />
-            <span className="text-[var(--color-primary)] font-medium text-sm">
-              {isSearching && "Searching for matching jobs..."}
-              {isAutoApplying && (autoProgress || "Generating applications for matching jobs...")}
-              {isAutomating && (automationStep || "Running full automation pipeline...")}
-            </span>
+          <div className="bg-[var(--color-primary)]/10 border border-[var(--color-primary)]/30 px-4 py-3 rounded-xl space-y-2">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3 flex-1 min-w-0">
+                <Loader2 className="w-5 h-5 animate-spin text-[var(--color-primary)] shrink-0" />
+                <span className="text-[var(--color-primary)] font-medium text-sm truncate">
+                  {isSearching && "Searching for matching jobs..."}
+                  {(isAutoApplying || isAutomating) && (autoProgress || automationStep || "Processing...")}
+                </span>
+              </div>
+              {(isAutoApplying || isAutomating) && !isSearching && (
+                <button
+                  onClick={handleStopPipeline}
+                  className="px-3 py-1.5 bg-red-500/20 border border-red-500/40 text-red-400 rounded-lg text-xs font-bold flex items-center gap-1 hover:bg-red-500/30 transition shrink-0"
+                >
+                  <StopCircle className="w-3.5 h-3.5" /> Stop
+                </button>
+              )}
+            </div>
+            {/* Progress bar */}
+            {autoProgressDetail && (
+              <div className="space-y-1">
+                <div className="flex justify-between text-[11px] text-gray-400">
+                  <span>{autoProgressDetail.job_title} at {autoProgressDetail.company}</span>
+                  <span>{autoProgressDetail.current}/{autoProgressDetail.total}</span>
+                </div>
+                <div className="w-full bg-white/10 rounded-full h-1.5">
+                  <div
+                    className="bg-[var(--color-primary)] h-1.5 rounded-full transition-all duration-500"
+                    style={{ width: `${(autoProgressDetail.current / autoProgressDetail.total) * 100}%` }}
+                  />
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -450,25 +573,41 @@ export default function DashboardPage() {
 
         {/* Auto-apply results summary */}
         {autoResults && (
-          <div className="bg-[#81C784]/10 border border-[#81C784]/30 p-4 rounded-xl space-y-2">
+          <div className="bg-[#81C784]/10 border border-[#81C784]/30 p-5 rounded-xl space-y-4">
             <h4 className="text-white font-bold flex items-center gap-2">
               <CheckCircle2 className="w-5 h-5 text-[#81C784]" />
               Automation Complete
             </h4>
-            <div className="grid grid-cols-3 gap-4 text-center">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-center">
               <div>
-                <div className="text-2xl font-bold text-white">{autoResults.total_found}</div>
-                <div className="text-xs text-gray-400">Jobs Found</div>
-              </div>
-              <div>
-                <div className="text-2xl font-bold text-[var(--color-primary)]">{autoResults.total_qualified}</div>
-                <div className="text-xs text-gray-400">Qualified (65%+)</div>
+                <div className="text-2xl font-bold text-white">{autoResults.total_processed || autoResults.total_found}</div>
+                <div className="text-xs text-gray-400">Processed</div>
               </div>
               <div>
                 <div className="text-2xl font-bold text-[#81C784]">{autoResults.total_generated}</div>
-                <div className="text-xs text-gray-400">Applications Ready</div>
+                <div className="text-xs text-gray-400">Generated</div>
+              </div>
+              <div>
+                <div className="text-2xl font-bold text-yellow-400">{autoResults.total_skipped || 0}</div>
+                <div className="text-xs text-gray-400">Skipped (&lt;65%)</div>
+              </div>
+              <div>
+                <div className="text-2xl font-bold text-red-400">{autoResults.total_errors || 0}</div>
+                <div className="text-xs text-gray-400">Errors</div>
+              </div>
+              <div>
+                <div className="text-2xl font-bold text-[var(--color-primary)] flex items-center justify-center gap-1">
+                  <DollarSign className="w-4 h-4" />
+                  {autoResults.estimated_cost || '$0.00'}
+                </div>
+                <div className="text-xs text-gray-400">Est. Cost</div>
               </div>
             </div>
+            <p className="text-xs text-gray-500 text-center">
+              {autoResults.total_processed || autoResults.total_found} jobs processed, {autoResults.total_generated} applications generated,{' '}
+              {autoResults.total_skipped || 0} skipped (below 65% match).
+              Estimated API cost: {autoResults.estimated_cost || '$0.00'}
+            </p>
           </div>
         )}
       </div>
