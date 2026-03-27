@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 import { TagInput } from "@/components/TagInput";
 import {
@@ -129,6 +129,20 @@ export default function PreferencesPage() {
     );
   };
 
+  // Keep refs in sync so handleSave always reads latest values
+  const rolesRef = useRef(targetRoles);
+  const locsRef = useRef(targetLocations);
+  useEffect(() => { rolesRef.current = targetRoles; }, [targetRoles]);
+  useEffect(() => { locsRef.current = targetLocations; }, [targetLocations]);
+
+  // Log every state change for debugging
+  useEffect(() => {
+    console.log("[preferences] State changed -> targetRoles:", targetRoles);
+  }, [targetRoles]);
+  useEffect(() => {
+    console.log("[preferences] State changed -> targetLocations:", targetLocations);
+  }, [targetLocations]);
+
   // ── Save current preferences via server API (bypasses RLS) ──
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -136,9 +150,20 @@ export default function PreferencesPage() {
     setError("");
 
     try {
+      // Read from both state and ref to diagnose any stale closure issue
+      console.log("[preferences] handleSave called");
+      console.log("[preferences] targetRoles (state):", targetRoles);
+      console.log("[preferences] targetRoles (ref):", rolesRef.current);
+      console.log("[preferences] targetLocations (state):", targetLocations);
+      console.log("[preferences] targetLocations (ref):", locsRef.current);
+
+      // Use ref values as they are guaranteed fresh
+      const roles = rolesRef.current;
+      const locs = locsRef.current;
+
       const payload = {
-        target_roles: targetRoles,
-        target_locations: targetLocations,
+        target_roles: roles,
+        target_locations: locs,
         salary_min: salaryMin ? parseInt(salaryMin) : null,
         salary_max: salaryMax ? parseInt(salaryMax) : null,
         work_type: workTypes.join(", "),
@@ -162,7 +187,7 @@ export default function PreferencesPage() {
 
       // Update recent suggestions
       buildRecentSuggestions(
-        { target_roles: targetRoles, target_locations: targetLocations },
+        { target_roles: roles, target_locations: locs },
         profiles
       );
 
@@ -252,17 +277,21 @@ export default function PreferencesPage() {
     }
   };
 
-  // ── Add suggestion tag ──
+  // ── Add suggestion tag (use functional update for safety) ──
   const addRoleSuggestion = (role: string) => {
-    if (!targetRoles.includes(role)) {
-      setTargetRoles([...targetRoles, role]);
-    }
+    setTargetRoles(prev => {
+      if (prev.includes(role)) return prev;
+      console.log("[preferences] Added role suggestion:", role);
+      return [...prev, role];
+    });
   };
 
   const addLocationSuggestion = (loc: string) => {
-    if (!targetLocations.includes(loc)) {
-      setTargetLocations([...targetLocations, loc]);
-    }
+    setTargetLocations(prev => {
+      if (prev.includes(loc)) return prev;
+      console.log("[preferences] Added location suggestion:", loc);
+      return [...prev, loc];
+    });
   };
 
   if (loading) {

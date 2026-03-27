@@ -1,12 +1,12 @@
 "use client";
 
-import { useState, KeyboardEvent } from "react";
+import { useState, KeyboardEvent, useCallback } from "react";
 import { X } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
 interface TagInputProps {
   tags: string[];
-  setTags: (tags: string[]) => void;
+  setTags: React.Dispatch<React.SetStateAction<string[]>>;
   placeholder: string;
   icon?: React.ReactNode;
 }
@@ -14,21 +14,40 @@ interface TagInputProps {
 export function TagInput({ tags, setTags, placeholder, icon }: TagInputProps) {
   const [inputValue, setInputValue] = useState("");
 
+  const addTag = useCallback((value: string) => {
+    const newTag = value.trim();
+    if (!newTag) return;
+    // Use functional updater to always get latest state
+    setTags(prev => {
+      if (prev.includes(newTag)) return prev;
+      const updated = [...prev, newTag];
+      console.log("[TagInput] Added tag:", newTag, "-> all tags:", updated);
+      return updated;
+    });
+    setInputValue("");
+  }, [setTags]);
+
   const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter" && inputValue.trim()) {
+    // ALWAYS prevent Enter from submitting the parent form
+    if (e.key === "Enter") {
       e.preventDefault();
-      const newTag = inputValue.trim();
-      if (!tags.includes(newTag)) {
-        setTags([...tags, newTag]);
+      if (inputValue.trim()) {
+        addTag(inputValue);
       }
-      setInputValue("");
     } else if (e.key === "Backspace" && !inputValue && tags.length > 0) {
-      setTags(tags.slice(0, -1));
+      setTags(prev => prev.slice(0, -1));
+    }
+  };
+
+  // Auto-commit typed text when user clicks away
+  const handleBlur = () => {
+    if (inputValue.trim()) {
+      addTag(inputValue);
     }
   };
 
   const removeTag = (indexToRemove: number) => {
-    setTags(tags.filter((_, index) => index !== indexToRemove));
+    setTags(prev => prev.filter((_, index) => index !== indexToRemove));
   };
 
   return (
@@ -59,6 +78,7 @@ export function TagInput({ tags, setTags, placeholder, icon }: TagInputProps) {
         value={inputValue}
         onChange={(e) => setInputValue(e.target.value)}
         onKeyDown={handleKeyDown}
+        onBlur={handleBlur}
         placeholder={tags.length === 0 ? placeholder : ""}
         className="flex-1 bg-transparent border-none outline-none text-white px-2 py-1 min-w-[120px]"
       />
