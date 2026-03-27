@@ -5,7 +5,7 @@ const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY || '',
 });
 
-function extractJSON(text: string): Record<string, string> {
+function extractJSON(text: string): Record<string, any> {
   try {
     return JSON.parse(text);
   } catch {}
@@ -32,20 +32,54 @@ export async function POST(request: Request) {
     // Use Claude to extract structured fields
     const response = await anthropic.messages.create({
       model: 'claude-sonnet-4-20250514',
-      max_tokens: 4096,
+      max_tokens: 8192,
       system: `You are a CV/resume data extraction system. Extract structured information from the provided CV text.
 
 Return ONLY a valid JSON object (no markdown, no explanation) with these fields:
+
+TOP-LEVEL STRING FIELDS (keep these as simple strings for backward compatibility):
 - "fullName": the person's full name
 - "email": email address
 - "phone": phone number
 - "location": city/country/address
-- "education": full education history with degrees, institutions, and dates
-- "workExperience": full work history with job titles, companies, dates, and descriptions
-- "skills": all technical and soft skills listed
-- "certifications": any certifications, licenses, or professional qualifications
+- "education": full education history as a single string with degrees, institutions, and dates
+- "workExperience": full work history as a single string with job titles, companies, dates, and descriptions
+- "skills": all technical and soft skills as a single comma-separated string
+- "certifications": any certifications, licenses, or professional qualifications as a single string
 
-For any field not found in the CV, use an empty string "". Extract as much detail as possible for workExperience and skills — include the full text of those sections.`,
+RICH STRUCTURED FIELDS (detailed breakdowns for better AI tailoring):
+- "structured_experience": array of objects, each with:
+  - "title": job title
+  - "company": company name
+  - "start_date": start date string (e.g. "Jan 2020")
+  - "end_date": end date string or "Present"
+  - "location": job location if mentioned
+  - "bullets": array of achievement/responsibility strings
+  - "technologies": array of specific tools/technologies mentioned in this role
+
+- "structured_education": array of objects, each with:
+  - "degree": degree name (e.g. "BSc Computer Science")
+  - "institution": school/university name
+  - "year": graduation year or date range
+  - "grade": grade/GPA if mentioned
+
+- "structured_skills": object with:
+  - "technical": array of technical skill strings (programming languages, frameworks, tools)
+  - "soft": array of soft skill strings (leadership, communication, etc.)
+  - "languages": array of spoken languages with proficiency if mentioned
+  - "tools": array of specific software/platforms (Jira, Figma, AWS, etc.)
+
+- "structured_certifications": array of objects, each with:
+  - "name": certification name
+  - "issuer": issuing organization
+  - "year": year obtained if mentioned
+
+- "summary": the professional summary/objective if present in the CV, as a string
+- "total_years_experience": estimated total years of professional experience as a number
+- "seniority_level": one of "entry", "mid", "senior", "lead", "executive" based on experience
+- "primary_domain": the candidate's primary professional domain (e.g. "Software Engineering", "Data Science", "Marketing")
+
+For any field not found in the CV, use an empty string "", empty array [], or null as appropriate.`,
       messages: [{ role: 'user', content: `Extract structured data from this CV:\n\n${rawText}` }]
     });
 
