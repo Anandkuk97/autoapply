@@ -65,6 +65,9 @@ export default function DashboardPage() {
   const [expandedJob, setExpandedJob] = useState<string | null>(null);
   const [viewingApp, setViewingApp] = useState<any>(null);
 
+  // Approval confirmation
+  const [approvalMessage, setApprovalMessage] = useState("");
+
   const steps = [
     "Analyzing JD",
     "Scoring Match",
@@ -395,6 +398,10 @@ export default function DashboardPage() {
 
     if (!error) {
       setApplications(prev => prev.map(app => app.id === id ? { ...app, status: "Applied" } : app));
+      const app = applications.find(a => a.id === id);
+      const email = userProfile?.email || user?.email || "your email";
+      setApprovalMessage(`Application for ${app?.role || "this role"} at ${app?.company || "the company"} approved! Confirmation details sent to ${email}.`);
+      setTimeout(() => setApprovalMessage(""), 8000);
     }
   };
 
@@ -411,6 +418,9 @@ export default function DashboardPage() {
           : app
       )
     );
+    const email = userProfile?.email || user?.email || "your email";
+    setApprovalMessage(`${readyApps.length} applications approved! Confirmation details sent to ${email}.`);
+    setTimeout(() => setApprovalMessage(""), 8000);
   };
 
   const handleStatusChange = async (id: string, newStatus: string) => {
@@ -466,6 +476,107 @@ export default function DashboardPage() {
           </div>
         ))}
       </div>
+
+      {/* APPROVAL CONFIRMATION TOAST */}
+      <AnimatePresence>
+        {approvalMessage && (
+          <motion.div
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            className="bg-[#81C784]/15 border border-[#81C784]/40 px-5 py-4 rounded-xl flex items-start gap-3"
+          >
+            <CheckCircle2 className="w-5 h-5 text-[#81C784] mt-0.5 shrink-0" />
+            <div className="flex-1">
+              <p className="text-[#81C784] font-medium text-sm">{approvalMessage}</p>
+              <p className="text-gray-500 text-xs mt-1">Actual email notifications will be enabled in a future update.</p>
+            </div>
+            <button onClick={() => setApprovalMessage("")} className="text-gray-500 hover:text-white text-lg leading-none">&times;</button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* WORKFLOW GUIDE (for new/incomplete users) */}
+      {(!loadingApps && applications.length < 3) && (
+        <div className="bg-white/5 border border-white/10 p-6 rounded-3xl">
+          <h3 className="text-lg font-heading font-bold text-white mb-4 flex items-center gap-2">
+            <Sparkles className="w-5 h-5 text-[var(--color-primary)]" />
+            How AutoApply Works
+          </h3>
+          <div className="space-y-3">
+            {[
+              {
+                num: 1,
+                text: "Upload your CV",
+                done: !!userProfile?.cv_text,
+                action: !userProfile?.cv_text ? "/dashboard/profile" : null,
+                actionLabel: "Upload CV",
+              },
+              {
+                num: 2,
+                text: "Set your job preferences",
+                done: !!(userProfile?.target_roles?.length && userProfile?.target_locations?.length),
+                action: !(userProfile?.target_roles?.length && userProfile?.target_locations?.length) ? "/dashboard/preferences" : null,
+                actionLabel: "Set Preferences",
+              },
+              {
+                num: 3,
+                text: "Click 'Find Jobs' to discover matching roles",
+                done: foundJobs.length > 0,
+                action: null,
+                actionLabel: null,
+              },
+              {
+                num: 4,
+                text: "Review matched jobs and their scores",
+                done: foundJobs.length > 0,
+                action: null,
+                actionLabel: null,
+              },
+              {
+                num: 5,
+                text: "Click 'Start Automation' to tailor CV and cover letter for each job",
+                done: applications.some(a => a.status === "ready"),
+                action: null,
+                actionLabel: null,
+              },
+              {
+                num: 6,
+                text: "Review and approve applications",
+                done: applications.some(a => a.status === "Applied"),
+                action: null,
+                actionLabel: null,
+              },
+              {
+                num: 7,
+                text: "Download tailored documents or let us apply for you",
+                done: false,
+                action: null,
+                actionLabel: null,
+              },
+            ].map((item) => (
+              <div key={item.num} className="flex items-center gap-3">
+                <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
+                  item.done ? "bg-[#81C784] text-black" : "bg-white/10 text-gray-500"
+                }`}>
+                  {item.done ? <Check className="w-3.5 h-3.5" /> : item.num}
+                </div>
+                <span className={`text-sm flex-1 ${item.done ? "text-gray-400 line-through" : "text-gray-300"}`}>
+                  {item.text}
+                </span>
+                {item.action && (
+                  <a
+                    href={item.action}
+                    className="px-3 py-1 bg-[var(--color-primary)]/20 text-[var(--color-primary)] rounded-lg text-xs font-bold hover:bg-[var(--color-primary)]/30 transition"
+                  >
+                    {item.actionLabel} &rarr;
+                  </a>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ═══════════════════════════════════════════════════════════ */}
       {/* AUTOMATED JOB SEARCH & APPLY SECTION                      */}

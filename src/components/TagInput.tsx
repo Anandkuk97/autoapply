@@ -1,48 +1,69 @@
 "use client";
 
-import { useState, KeyboardEvent, useCallback } from "react";
-import { X } from "lucide-react";
+import { useState, KeyboardEvent, useCallback, ChangeEvent } from "react";
+import { X, Plus } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
 interface TagInputProps {
   tags: string[];
   setTags: React.Dispatch<React.SetStateAction<string[]>>;
-  placeholder: string;
+  placeholder?: string;
   icon?: React.ReactNode;
 }
 
-export function TagInput({ tags, setTags, placeholder, icon }: TagInputProps) {
+export function TagInput({ tags, setTags, placeholder = "Type and press Enter or click +", icon }: TagInputProps) {
   const [inputValue, setInputValue] = useState("");
 
   const addTag = useCallback((value: string) => {
     const newTag = value.trim();
     if (!newTag) return;
-    // Use functional updater to always get latest state
     setTags(prev => {
       if (prev.includes(newTag)) return prev;
-      const updated = [...prev, newTag];
-      console.log("[TagInput] Added tag:", newTag, "-> all tags:", updated);
-      return updated;
+      return [...prev, newTag];
     });
-    setInputValue("");
   }, [setTags]);
+
+  // Add multiple tags from comma-separated input
+  const addTagsFromInput = useCallback((raw: string) => {
+    const parts = raw.split(",").map(s => s.trim()).filter(s => s.length > 0);
+    if (parts.length === 0) return;
+    for (const part of parts) {
+      addTag(part);
+    }
+    setInputValue("");
+  }, [addTag]);
+
+  const handleChange = (e: ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    // If user types a comma, auto-split and add tags
+    if (val.includes(",")) {
+      addTagsFromInput(val);
+    } else {
+      setInputValue(val);
+    }
+  };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     // ALWAYS prevent Enter from submitting the parent form
     if (e.key === "Enter") {
       e.preventDefault();
       if (inputValue.trim()) {
-        addTag(inputValue);
+        addTagsFromInput(inputValue);
       }
     } else if (e.key === "Backspace" && !inputValue && tags.length > 0) {
       setTags(prev => prev.slice(0, -1));
     }
   };
 
-  // Auto-commit typed text when user clicks away
   const handleBlur = () => {
     if (inputValue.trim()) {
-      addTag(inputValue);
+      addTagsFromInput(inputValue);
+    }
+  };
+
+  const handleAddClick = () => {
+    if (inputValue.trim()) {
+      addTagsFromInput(inputValue);
     }
   };
 
@@ -76,12 +97,22 @@ export function TagInput({ tags, setTags, placeholder, icon }: TagInputProps) {
       <input
         type="text"
         value={inputValue}
-        onChange={(e) => setInputValue(e.target.value)}
+        onChange={handleChange}
         onKeyDown={handleKeyDown}
         onBlur={handleBlur}
         placeholder={tags.length === 0 ? placeholder : ""}
-        className="flex-1 bg-transparent border-none outline-none text-white px-2 py-1 min-w-[120px]"
+        className="flex-1 bg-transparent border-none outline-none text-white px-2 py-1 min-w-[100px]"
       />
+      {/* Visible + button */}
+      <button
+        type="button"
+        onClick={handleAddClick}
+        disabled={!inputValue.trim()}
+        className="w-8 h-8 rounded-lg bg-[var(--color-primary)]/20 text-[var(--color-primary)] flex items-center justify-center hover:bg-[var(--color-primary)]/40 transition disabled:opacity-30 disabled:cursor-not-allowed shrink-0"
+        title="Add tag"
+      >
+        <Plus className="w-4 h-4" />
+      </button>
     </div>
   );
 }
