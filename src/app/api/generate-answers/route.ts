@@ -24,7 +24,7 @@ export async function POST(request: Request) {
 
     if (mode === 'assistant') {
       const response = await anthropic.messages.create({
-        model: 'claude-3-5-sonnet-20240620',
+        model: 'claude-sonnet-4-20250514',
         max_tokens: 1000,
         system: "You are an expert AI Job Application Assistant named AutoApply. Provide helpful, professional, and directly actionable advice to the user's queries based on the text they highlighted. Be concise. Do not wrap answers in JSON.",
         messages: [{ role: 'user', content: customPrompt }],
@@ -53,7 +53,7 @@ Return ONLY a valid JSON object where keys are the field IDs and values are stri
     const userMessage = `Job Description: \n${job_description}\n\nUser CV: \n${userProfile.cv_text}\n\nUser Details: ${JSON.stringify(userProfile.cv_parsed_json)}\n\nForm Fields to Answer: \n${JSON.stringify(fields)}`;
 
     const response = await anthropic.messages.create({
-      model: 'claude-3-5-sonnet-20240620',
+      model: 'claude-sonnet-4-20250514',
       max_tokens: 1500,
       system: systemPrompt,
       messages: [{ role: 'user', content: userMessage }],
