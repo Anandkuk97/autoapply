@@ -20,6 +20,17 @@ function extractJSON(text: string): Record<string, any> {
   throw new Error('Could not parse JSON from Claude response');
 }
 
+export async function OPTIONS() {
+  return new NextResponse(null, {
+    status: 200,
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'OPTIONS, POST',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    },
+  });
+}
+
 export async function POST(request: Request) {
   try {
     const body = await request.json();
@@ -28,7 +39,7 @@ export async function POST(request: Request) {
     const userId: string = body.userId;
 
     if ((!rawText || rawText.trim().length === 0) && !fileData) {
-      return NextResponse.json({ error: 'No CV text or file provided' }, { status: 400 });
+      return NextResponse.json({ error: 'No CV text or file provided' }, { status: 400, headers: { 'Access-Control-Allow-Origin': '*' } });
     }
 
     let messageContent: any[] = [];
@@ -117,10 +128,13 @@ For any field not found in the CV, use an empty string "", empty array [], or nu
       }
     }
 
-    return NextResponse.json({ text: rawText || 'Extracted via Base64 Extension Upload', parsedData });
+    return NextResponse.json(
+      { text: rawText || 'Extracted via Base64 Extension Upload', parsedData },
+      { status: 200, headers: { 'Access-Control-Allow-Origin': '*' } }
+    );
 
   } catch (error: any) {
     console.error('Route error:', error);
-    return NextResponse.json({ error: error.message || 'Failed to process request' }, { status: 500 });
+    return NextResponse.json({ error: error.message || 'Failed to process request' }, { status: 500, headers: { 'Access-Control-Allow-Origin': '*' } });
   }
 }
