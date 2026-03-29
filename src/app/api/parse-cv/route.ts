@@ -24,14 +24,27 @@ export async function POST(request: Request) {
   try {
     const body = await request.json();
     const rawText: string = body.text;
+    const fileData: string = body.fileData; // base64 pdf string
+    const userId: string = body.userId;
 
-    if (!rawText || rawText.trim().length === 0) {
-      return NextResponse.json({ error: 'No CV text provided' }, { status: 400 });
+    if ((!rawText || rawText.trim().length === 0) && !fileData) {
+      return NextResponse.json({ error: 'No CV text or file provided' }, { status: 400 });
+    }
+
+    let messageContent: any[] = [];
+    if (fileData) {
+      messageContent.push({
+        type: 'document',
+        source: { type: 'base64', media_type: 'application/pdf', data: fileData }
+      });
+      messageContent.push({ type: 'text', text: 'Extract structured data from this PDF CV.' });
+    } else {
+      messageContent.push({ type: 'text', text: `Extract structured data from this CV:\n\n${rawText}` });
     }
 
     // Use Claude to extract structured fields
     const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-3-5-sonnet-20241022',
       max_tokens: 8192,
       system: `You are a CV/resume data extraction system. Extract structured information from the provided CV text.
 
@@ -80,13 +93,31 @@ RICH STRUCTURED FIELDS (detailed breakdowns for better AI tailoring):
 - "primary_domain": the candidate's primary professional domain (e.g. "Software Engineering", "Data Science", "Marketing")
 
 For any field not found in the CV, use an empty string "", empty array [], or null as appropriate.`,
-      messages: [{ role: 'user', content: `Extract structured data from this CV:\n\n${rawText}` }]
+      messages: [{ role: 'user', content: messageContent }]
     });
 
     const resultText = (response.content[0] as any).text.trim();
     const parsedData = extractJSON(resultText);
 
-    return NextResponse.json({ text: rawText, parsedData });
+    if (userId) {
+      // Background save of profile updates when uploaded from Extension Side Panel
+      try {
+        const { createAdminClient } = await import('@/utils/supabase/admin');
+        const admin = createAdminClient();
+        
+        await admin.from('users').update({
+          name: parsedData.fullName || null,
+          cv_text: rawText || 'Extracted via Base64 Extension Upload',
+          cv_parsed_json: parsedData
+        }).eq('id', userId);
+        
+        // Ensure profile exists or is mapped properly. 
+      } catch (e) {
+        console.error("Failed silently to link DB user profile", e);
+      }
+    }
+
+    return NextResponse.json({ text: rawText || 'Extracted via Base64 Extension Upload', parsedData });
 
   } catch (error: any) {
     console.error('Route error:', error);

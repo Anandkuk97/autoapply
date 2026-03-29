@@ -20,10 +20,20 @@ export async function OPTIONS() {
 
 export async function POST(request: Request) {
   try {
-    const { fields, user_id, job_description } = await request.json();
+    const { fields, user_id, job_description, mode, customPrompt } = await request.json();
+
+    if (mode === 'assistant') {
+      const response = await anthropic.messages.create({
+        model: 'claude-3-5-sonnet-20241022',
+        max_tokens: 1000,
+        system: "You are an expert AI Job Application Assistant named AutoApply. Provide helpful, professional, and directly actionable advice to the user's queries based on the text they highlighted. Be concise. Do not wrap answers in JSON.",
+        messages: [{ role: 'user', content: customPrompt }],
+      });
+      return NextResponse.json({ answer: (response.content[0] as any).text.trim() }, { status: 200, headers: { 'Access-Control-Allow-Origin': '*' } });
+    }
 
     if (!fields || !user_id || !job_description) {
-      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+      return NextResponse.json({ error: 'Missing required fields' }, { status: 400, headers: { 'Access-Control-Allow-Origin': '*' } });
     }
 
     const admin = createAdminClient();
@@ -43,7 +53,7 @@ Return ONLY a valid JSON object where keys are the field IDs and values are stri
     const userMessage = `Job Description: \n${job_description}\n\nUser CV: \n${userProfile.cv_text}\n\nUser Details: ${JSON.stringify(userProfile.cv_parsed_json)}\n\nForm Fields to Answer: \n${JSON.stringify(fields)}`;
 
     const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-3-5-sonnet-20241022',
       max_tokens: 1500,
       system: systemPrompt,
       messages: [{ role: 'user', content: userMessage }],
