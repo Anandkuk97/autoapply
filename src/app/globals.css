@@ -4,22 +4,47 @@
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-primary: #F5C518;
-  --font-sans: var(--font-dm-sans);
-  --font-mono: var(--font-jetbrains-mono);
-  --font-heading: var(--font-jetbrains-mono);
+  --color-cta: #00E676;
+  --color-gold: #F5C518;
+  --color-surface: #111113;
+  --color-surface-light: #1a1a1f;
+  --color-surface-card: #141416;
+  --color-border: rgba(255, 255, 255, 0.08);
+  --font-sans: var(--font-inter);
+  --font-serif: var(--font-instrument-serif);
+  --font-mono: var(--font-dm-mono);
+  --font-heading: var(--font-inter);
 }
 
 :root {
   --background: #08080A;
-  --foreground: #ededed;
+  --foreground: #F0F4FF;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: var(--font-sans);
+  font-family: var(--font-inter), system-ui, sans-serif;
 }
 
 h1, h2, h3, h4, h5, h6 {
-  font-family: var(--font-heading);
+  font-family: var(--font-inter), system-ui, sans-serif;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #08080A;
+}
+::-webkit-scrollbar-thumb {
+  background: #333;
+  border-radius: 3px;
+}
+
+/* Selection */
+::selection {
+  background: rgba(245, 197, 24, 0.3);
+  color: #fff;
 }
