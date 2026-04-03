@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>CareerArchitect - JD Detection</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "surface-container": "#e7eefe",
+                        "on-primary-container": "#003819",
+                        "on-tertiary-container": "#3e008d",
+                        "on-secondary-fixed": "#141b2b",
+                        "outline-variant": "#bccabb",
+                        "on-background": "#151c27",
+                        "tertiary-fixed": "#eaddff",
+                        "on-tertiary": "#ffffff",
+                        "on-secondary": "#ffffff",
+                        "inverse-primary": "#59df87",
+                        "surface-dim": "#d3daea",
+                        "on-primary": "#ffffff",
+                        "error": "#ba1a1a",
+                        "on-surface": "#151c27",
+                        "on-error": "#ffffff",
+                        "inverse-surface": "#2a313d",
+                        "secondary-fixed-dim": "#c0c6db",
+                        "tertiary-fixed-dim": "#d2bbff",
+                        "surface-container-lowest": "#ffffff",
+                        "surface-tint": "#006d36",
+                        "primary-container": "#15ae5c",
+                        "primary": "#006d36",
+                        "error-container": "#ffdad6",
+                        "tertiary": "#732ee4",
+                        "on-secondary-fixed-variant": "#404758",
+                        "on-primary-fixed": "#00210c",
+                        "on-error-container": "#93000a",
+                        "primary-fixed": "#77fca0",
+                        "secondary-fixed": "#dce2f7",
+                        "on-surface-variant": "#3d4a3e",
+                        "secondary": "#575e70",
+                        "surface-variant": "#dce2f3",
+                        "on-primary-fixed-variant": "#005227",
+                        "background": "#f9f9ff",
+                        "on-secondary-container": "#5c6274",
+                        "surface-container-low": "#f0f3ff",
+                        "surface-container-high": "#e2e8f8",
+                        "primary-fixed-dim": "#59df87",
+                        "on-tertiary-fixed": "#25005a",
+                        "outline": "#6d7b6d",
+                        "on-tertiary-fixed-variant": "#5a00c6",
+                        "surface-container-highest": "#dce2f3",
+                        "surface-bright": "#f9f9ff",
+                        "surface": "#f9f9ff",
+                        "secondary-container": "#d9dff5",
+                        "tertiary-container": "#aa80ff",
+                        "inverse-on-surface": "#ebf1ff"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "1.5rem",
+                        "full": "9999px"
+                    },
+                    "fontFamily": {
+                        "headline": ["Inter"],
+                        "body": ["Inter"],
+                        "label": ["Inter"]
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        .glass-effect {
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+        }
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .scanner-line {
+            background: linear-gradient(to bottom, transparent, #15ae5c, transparent);
+            height: 40px;
+            width: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+            animation: scan 3s infinite linear;
+            opacity: 0.5;
+        }
+        @keyframes scan {
+            0% { transform: translateY(-40px); }
+            100% { transform: translateY(200px); }
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-background font-body text-on-surface antialiased min-h-screen pb-32">
+<!-- Top Navigation Bar -->
+<nav class="fixed top-0 w-full z-50 bg-white/70 backdrop-blur-xl shadow-[0_1px_15px_rgba(0,0,0,0.02)]">
+<div class="flex justify-between items-center px-6 h-16 w-full max-w-7xl mx-auto">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-emerald-600" data-icon="grid_view">grid_view</span>
+<h1 class="text-xl font-bold tracking-tighter text-zinc-900">CareerArchitect</h1>
+</div>
+<div class="w-10 h-10 rounded-full bg-surface-container-highest overflow-hidden border border-outline-variant/10">
+<img alt="User Profile" data-alt="Close up portrait of a professional woman with a soft smile in a bright airy studio setting" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCljad6U45D_zpPHijZDDyvES-kBFfJHOr4CIpmftPZ8V0sT95O_GrtP9tNcxm88CNcGeEstdJzf7g9vHFZYwHjYoww3bXcs0wLxAr7kcV_ucGo5gYLqd19fBPKX4BtFm42jK-78TALXCMPqKGAEQx6OQsZzWM0wn_o6wXN7BfN5g8x6WQU46qYDacwSpDoF8IbLTuB1FQhHP_2YFVqrtEiyWjmIPEDgAHNOVA4zz00IKN9FM-eHeQ8JywMH05EuV2n01cEm9-4KFpL"/>
+</div>
+</div>
+</nav>
+<main class="pt-24 px-6 space-y-8 max-w-xl mx-auto">
+<!-- Detection Status Header -->
+<header class="space-y-1">
+<h2 class="text-[3.5rem] font-extrabold leading-[1.1] tracking-tighter text-zinc-900">Detecting.</h2>
+<p class="text-secondary label-md tracking-widest uppercase font-semibold">Active Intelligence Engine</p>
+</header>
+<!-- Current JD Card (Glassmorphism & Scan Animation) -->
+<section class="relative overflow-hidden rounded-xl bg-surface-container-low p-1 group">
+<div class="relative overflow-hidden rounded-xl bg-white dark:bg-zinc-900 shadow-sm border border-outline-variant/10 p-6 space-y-6">
+<!-- Scan Overlay -->
+<div class="absolute inset-0 pointer-events-none overflow-hidden">
+<div class="scanner-line"></div>
+</div>
+<div class="flex items-start justify-between">
+<div class="space-y-1">
+<span class="inline-flex items-center gap-2 px-3 py-1 bg-emerald-50 text-emerald-700 text-[10px] font-bold uppercase tracking-wider rounded-full">
+<span class="w-1.5 h-1.5 rounded-full bg-emerald-600"></span>
+                            Live Detection
+                        </span>
+<h3 class="text-2xl font-bold text-zinc-900 mt-3">Software Engineer</h3>
+<p class="text-emerald-600 font-medium">at TechFlow</p>
+</div>
+<div class="w-14 h-14 bg-surface-container flex items-center justify-center rounded-xl">
+<span class="material-symbols-outlined text-primary text-3xl" data-icon="terminal">terminal</span>
+</div>
+</div>
+<div class="grid grid-cols-2 gap-4 py-4">
+<div class="bg-surface-container-low rounded-xl p-4">
+<p class="text-secondary text-[11px] uppercase tracking-widest font-bold">Matching</p>
+<p class="text-xl font-bold text-zinc-900">84%</p>
+</div>
+<div class="bg-surface-container-low rounded-xl p-4">
+<p class="text-secondary text-[11px] uppercase tracking-widest font-bold">Skills Found</p>
+<p class="text-xl font-bold text-zinc-900">12/15</p>
+</div>
+</div>
+<button class="w-full py-5 bg-gradient-to-br from-primary to-primary-container text-white rounded-xl font-bold shadow-lg shadow-emerald-900/10 active:scale-95 transition-all duration-300 flex items-center justify-center gap-3">
+                    Start Tailoring
+                    <span class="material-symbols-outlined" data-icon="auto_awesome" style="font-variation-settings: 'FILL' 1;">auto_awesome</span>
+</button>
+</div>
+</section>
+<!-- Recently Detected Section -->
+<section class="space-y-6">
+<div class="flex items-center justify-between">
+<h3 class="text-xl font-bold tracking-tight text-zinc-900">Recently Detected</h3>
+<button class="text-primary text-sm font-semibold hover:underline">View All</button>
+</div>
+<div class="space-y-3">
+<!-- Job Item 1 -->
+<div class="group flex items-center justify-between p-4 bg-white rounded-xl shadow-sm hover:bg-emerald-50/50 transition-colors duration-200">
+<div class="flex items-center gap-4">
+<div class="w-12 h-12 bg-surface-container-low rounded-xl flex items-center justify-center overflow-hidden">
+<img alt="Tech Logo" class="w-8 h-8 object-contain" data-alt="Minimalist abstract corporate logo with geometric shapes and professional navy blue colors" src="https://lh3.googleusercontent.com/aida-public/AB6AXuACgb8m62aqFmkMgfBRQPH8YHxQP-sksTEM1yvTstmAKjHLZeSQ_nRbDdrDjTX21nx9rQK_qE4QRmnjE-Ep2zwh1oj1yd3j-bh9eIu2NT0WiZUMsf0kbV-uOKlbWLt1xvH4KQ0E7MyihxT-XJMouRICpp66YyJQkV6_ZDh8TCGKNnLtjyPCGNJ99zhuzIqZYAJDzhRSB2DffhHmuCLWbpQKauzWspC6eHj_UU02JWwL2Gt8Af2k3bSFujb57YRgC8WBlsko_itL8uLu"/>
+</div>
+<div>
+<p class="font-bold text-zinc-900">Senior Product Designer</p>
+<p class="text-sm text-secondary">Aperture Science • 2h ago</p>
+</div>
+</div>
+<span class="material-symbols-outlined text-zinc-400 group-hover:text-primary transition-colors" data-icon="chevron_right">chevron_right</span>
+</div>
+<!-- Job Item 2 -->
+<div class="group flex items-center justify-between p-4 bg-white rounded-xl shadow-sm hover:bg-emerald-50/50 transition-colors duration-200">
+<div class="flex items-center gap-4">
+<div class="w-12 h-12 bg-surface-container-low rounded-xl flex items-center justify-center overflow-hidden">
+<img alt="Tech Logo" class="w-8 h-8 object-contain" data-alt="Sleek modern tech logo with vibrant purple and green gradient accents on a clean background" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCi1FsOan6CXgTQLqkhMCWBmCYZ6PvUiGVwNcI8SgtAp15hRJF3455x-WlkXNVDjZaIqK5f_Z7HNZe3GzwY-iZQtkTTvw6X9gTlpEUyINa3zr1mwrXLJT6dXNGM3Z3YmlK8jwXpVXC-c4vUz4wbCD2AAPtrPYWxyJPSe7LkFqMTsWJPCKsvR9-YDIvOjTB6fHktS5NNUMWwp8MIZRNlEr1bEWNGd764zMgBvIsoZ-6iinTStyn4k4-KmJ1_h-UWovdJmviwVcHEDSv6"/>
+</div>
+<div>
+<p class="font-bold text-zinc-900">Full Stack Developer</p>
+<p class="text-sm text-secondary">Cyberdyne Systems • 5h ago</p>
+</div>
+</div>
+<span class="material-symbols-outlined text-zinc-400 group-hover:text-primary transition-colors" data-icon="chevron_right">chevron_right</span>
+</div>
+<!-- Job Item 3 -->
+<div class="group flex items-center justify-between p-4 bg-white rounded-xl shadow-sm hover:bg-emerald-50/50 transition-colors duration-200">
+<div class="flex items-center gap-4">
+<div class="w-12 h-12 bg-surface-container-low rounded-xl flex items-center justify-center overflow-hidden">
+<img alt="Tech Logo" class="w-8 h-8 object-contain" data-alt="Luxury tech brand logo with metallic gold finishes and minimalist typography on a white field" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDbMvlRnMZ4pfJDHsFTlIYOLDQZOd4Mn055tAII5mCQBdNZYYiycq-TA7gLMbYyiYMDqet0OI-r4QLjCIV_MvqHVyd-FypLH8JeW3cNpxuuZVyUpycJKHovPRJwCO2feccNEAxzEaW41x71J7FFKVe3DmRYwGtl8T3wo0yxzE3mI7H-cyH99x7BJrTHvWGIjelo5eVR0KAXXSc5qxkymrcGpfxwkPA2IO4p4W2V-HfYuRTTUwlekkV6H8rcnucG2H2LoxILgmyd5FdM"/>
+</div>
+<div>
+<p class="font-bold text-zinc-900">Cloud Architect</p>
+<p class="text-sm text-secondary">Stark Industries • Yesterday</p>
+</div>
+</div>
+<span class="material-symbols-outlined text-zinc-400 group-hover:text-primary transition-colors" data-icon="chevron_right">chevron_right</span>
+</div>
+</div>
+</section>
+<!-- Stats Bento Section -->
+<section class="grid grid-cols-2 gap-4">
+<div class="bg-surface-container-highest/40 backdrop-blur-md rounded-xl p-5 space-y-2 border border-white/20">
+<span class="material-symbols-outlined text-tertiary" data-icon="insights">insights</span>
+<p class="text-3xl font-extrabold text-zinc-900">42</p>
+<p class="text-[10px] uppercase tracking-widest font-bold text-secondary">Jobs Detected</p>
+</div>
+<div class="bg-surface-container-highest/40 backdrop-blur-md rounded-xl p-5 space-y-2 border border-white/20">
+<span class="material-symbols-outlined text-primary" data-icon="speed">speed</span>
+<p class="text-3xl font-extrabold text-zinc-900">0.8s</p>
+<p class="text-[10px] uppercase tracking-widest font-bold text-secondary">Avg Latency</p>
+</div>
+</section>
+</main>
+<!-- Bottom Navigation Bar -->
+<nav class="fixed bottom-0 left-0 w-full z-50 bg-white/80 backdrop-blur-2xl rounded-t-[2rem] shadow-[0_-10px_40px_rgba(21,28,39,0.06)] flex justify-around items-center px-4 pb-8 pt-3">
+<!-- Detect Tab (Active) -->
+<a class="flex flex-col items-center justify-center bg-emerald-50 text-emerald-700 rounded-2xl px-5 py-2 transition-transform duration-300 active:scale-90" href="#">
+<span class="material-symbols-outlined mb-1" data-icon="target" style="font-variation-settings: 'FILL' 1;">target</span>
+<span class="text-[11px] font-medium font-['Inter'] uppercase tracking-widest">Detect</span>
+</a>
+<!-- Tailor Tab -->
+<a class="flex flex-col items-center justify-center text-zinc-400 px-5 py-2 hover:text-emerald-500 transition-all active:scale-90 duration-300" href="#">
+<span class="material-symbols-outlined mb-1" data-icon="auto_awesome">auto_awesome</span>
+<span class="text-[11px] font-medium font-['Inter'] uppercase tracking-widest">Tailor</span>
+</a>
+<!-- Scores Tab -->
+<a class="flex flex-col items-center justify-center text-zinc-400 px-5 py-2 hover:text-emerald-500 transition-all active:scale-90 duration-300" href="#">
+<span class="material-symbols-outlined mb-1" data-icon="analytics">analytics</span>
+<span class="text-[11px] font-medium font-['Inter'] uppercase tracking-widest">Scores</span>
+</a>
+<!-- Apply Tab -->
+<a class="flex flex-col items-center justify-center text-zinc-400 px-5 py-2 hover:text-emerald-500 transition-all active:scale-90 duration-300" href="#">
+<span class="material-symbols-outlined mb-1" data-icon="border_color">border_color</span>
+<span class="text-[11px] font-medium font-['Inter'] uppercase tracking-widest">Apply</span>
+</a>
+</nav>
+</body></html>

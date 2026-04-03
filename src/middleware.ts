@@ -2,6 +2,12 @@ import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
 export async function middleware(request: NextRequest) {
+  // Skip Supabase auth for public routes
+  const publicRoutes = ['/', '/login', '/signup', '/onboarding']
+  if (publicRoutes.includes(request.nextUrl.pathname)) {
+    return NextResponse.next()
+  }
+
   let supabaseResponse = NextResponse.next({
     request,
   })

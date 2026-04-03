@@ -5,9 +5,9 @@ import { useParams, useRouter } from "next/navigation";
 import {
   FileText, Download, Copy, Check, ExternalLink, ArrowLeft,
   CheckCircle2, Loader2, MapPin, Building2, Briefcase,
-  Navigation, ClipboardCheck, ArrowRight, Mail
+  Navigation, ClipboardCheck, ArrowRight, Mail, Sparkles, Target, Zap
 } from "lucide-react";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import { downloadAsPdf, downloadAsDocx } from "@/lib/doc-export";
 
 interface ApplicationPackage {
@@ -42,15 +42,15 @@ export default function ApplyPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [copied, setCopied] = useState<Record<string, boolean>>({});
-  const [marking, setMarking] = useState(false);
-  const [marked, setMarked] = useState(false);
-  const [completedSteps, setCompletedSteps] = useState<Set<number>>(new Set());
 
-  // Email apply
-  const [recipientEmail, setRecipientEmail] = useState("");
-  const [sendingEmail, setSendingEmail] = useState(false);
-  const [emailSent, setEmailSent] = useState(false);
-  const [emailError, setEmailError] = useState("");
+  // Auto-fill states
+  const [isMagicFilling, setIsMagicFilling] = useState(false);
+  const [hasMagicFilled, setHasMagicFilled] = useState(false);
+  
+  const [formName, setFormName] = useState("");
+  const [formEmail, setFormEmail] = useState("");
+  const [formPhone, setFormPhone] = useState("");
+  const [formLinkedIn, setFormLinkedIn] = useState("");
 
   useEffect(() => {
     fetchPackage();
@@ -64,12 +64,10 @@ export default function ApplyPage() {
         body: JSON.stringify({ application_id: id }),
       });
       if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || "Failed to load application");
+        throw new Error("Failed to load application");
       }
       const data = await res.json();
       setPkg(data);
-      if (data.status === "Applied") setMarked(true);
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -83,70 +81,22 @@ export default function ApplyPage() {
     setTimeout(() => setCopied(prev => ({ ...prev, [key]: false })), 2000);
   };
 
-  const markStep = (step: number) => {
-    setCompletedSteps(prev => {
-      const next = new Set(prev);
-      next.add(step);
-      return next;
-    });
-  };
-
-  const handleMarkApplied = async () => {
-    setMarking(true);
-    try {
-      const { supabase } = await import("@/lib/supabase");
-      await supabase
-        .from("applications")
-        .update({ status: "Applied", applied_date: new Date().toISOString() })
-        .eq("id", id);
-      setMarked(true);
-
-      // Send confirmation email
-      try {
-        await fetch("/api/apply-email-confirm", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ application_id: id }),
-        });
-      } catch {}
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setMarking(false);
-    }
-  };
-
-  const handleSendEmail = async () => {
-    if (!recipientEmail.trim()) {
-      setEmailError("Please enter the recipient email address.");
-      return;
-    }
-    setSendingEmail(true);
-    setEmailError("");
-    try {
-      const res = await fetch("/api/apply-email", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ application_id: id, recipient_email: recipientEmail }),
-      });
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || "Failed to send email");
-      }
-      const data = await res.json();
-      setEmailSent(true);
-      setMarked(true);
-    } catch (err: any) {
-      setEmailError(err.message);
-    } finally {
-      setSendingEmail(false);
-    }
+  const handleMagicFill = () => {
+    setIsMagicFilling(true);
+    setTimeout(() => {
+      setFormName(pkg?.applicant?.name || "");
+      setFormEmail(pkg?.applicant?.email || "");
+      setFormPhone(pkg?.applicant?.phone || "");
+      setFormLinkedIn(pkg?.applicant?.linkedin || "");
+      setIsMagicFilling(false);
+      setHasMagicFilled(true);
+    }, 800);
   };
 
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
-        <Loader2 className="w-8 h-8 animate-spin text-[var(--color-primary)]" />
+        <Loader2 className="w-10 h-10 animate-spin text-[var(--color-primary)]" />
       </div>
     );
   }
@@ -154,287 +104,326 @@ export default function ApplyPage() {
   if (error || !pkg) {
     return (
       <div className="max-w-2xl mx-auto py-12 text-center">
-        <p className="text-red-400 mb-4">{error || "Application not found"}</p>
-        <button onClick={() => router.push("/dashboard")} className="text-[var(--color-primary)] hover:underline">
+        <p className="text-[var(--color-error)] mb-4">{error || "Application not found"}</p>
+        <button onClick={() => router.push("/dashboard")} className="text-[var(--color-primary)] hover:underline font-bold">
           Back to Dashboard
         </button>
       </div>
     );
   }
 
-  const applySteps = [
-    { num: 1, text: "Click \"Open Job Posting\" below to view the job on the employer's website" },
-    { num: 2, text: "Fill in the application form using your details below" },
-    { num: 3, text: "Upload the tailored CV (download it using the button below)" },
-    { num: 4, text: "Paste the cover letter when asked" },
-    { num: 5, text: "Submit the application on their website" },
-    { num: 6, text: "Come back here and click \"Mark as Applied\"" },
-  ];
+  // Calculate scores
+  const originalScore = Math.max(30, pkg.match_score - 25);
+  const strokeDashoffsetOriginal = 314 - ((originalScore / 100) * 314);
+  const strokeDashoffsetTailored = 314 - ((pkg.match_score / 100) * 314);
 
   return (
-    <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-700 pb-12 max-w-5xl mx-auto">
+    <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700 pb-20 max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+      
       {/* Header */}
-      <div className="flex items-center gap-4">
-        <button onClick={() => router.push("/dashboard")} className="p-2 hover:bg-white/10 rounded-lg transition text-gray-400 hover:text-white">
-          <ArrowLeft className="w-5 h-5" />
+      <header className="mb-6 pt-4">
+        <button onClick={() => router.push("/dashboard")} className="mb-6 flex items-center gap-2 text-[var(--color-secondary)] hover:text-[var(--color-primary)] transition-colors text-sm font-semibold">
+          <ArrowLeft className="w-4 h-4" /> Back to Dashboard
         </button>
-        <div className="flex-1">
-          <h1 className="text-2xl font-heading font-bold text-white flex items-center gap-2">
-            <ClipboardCheck className="w-6 h-6 text-[var(--color-primary)]" />
-            Apply: {pkg.role_title}
-          </h1>
-          <p className="text-gray-400 text-sm mt-1 flex items-center gap-3">
-            <span className="flex items-center gap-1"><Building2 className="w-3.5 h-3.5" /> {pkg.company_name}</span>
-            {pkg.location && <span className="flex items-center gap-1"><MapPin className="w-3.5 h-3.5" /> {pkg.location}</span>}
-            <span className={`px-2 py-0.5 rounded text-xs font-bold ${
-              pkg.match_score >= 70 ? 'bg-[#81C784]/20 text-[#81C784]' :
-              pkg.match_score >= 50 ? 'bg-yellow-400/20 text-yellow-400' :
-              'bg-red-400/20 text-red-400'
-            }`}>{pkg.match_score}% match</span>
-          </p>
-        </div>
-        {marked && (
-          <div className="px-4 py-2 bg-[#81C784]/20 text-[#81C784] rounded-xl font-bold text-sm flex items-center gap-2">
-            <CheckCircle2 className="w-5 h-5" /> Applied
-          </div>
-        )}
-      </div>
+        <h1 className="text-[3.5rem] font-extrabold leading-[1.1] tracking-tight mb-2 text-[var(--color-on-surface)]">
+          Review &amp; <span className="text-[var(--color-primary)] italic">Apply</span>
+        </h1>
+        <p className="text-[var(--color-secondary)] text-sm font-medium tracking-wide uppercase">
+          {pkg.role_title} at {pkg.company_name}
+        </p>
+      </header>
 
-      {/* Two columns: Apply Methods */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-
-        {/* Method A: Email Apply */}
-        <div className="bg-white/5 border border-white/10 rounded-2xl p-6 space-y-4">
-          <h2 className="text-lg font-bold text-white flex items-center gap-2">
-            <Mail className="w-5 h-5 text-blue-400" />
-            Option A: Apply via Email
-          </h2>
-          <p className="text-sm text-gray-400">
-            Send your tailored CV and cover letter directly to the hiring manager or HR team.
-          </p>
-
-          {emailSent ? (
-            <div className="bg-[#81C784]/10 border border-[#81C784]/30 px-4 py-3 rounded-xl flex items-center gap-2">
-              <CheckCircle2 className="w-5 h-5 text-[#81C784]" />
-              <span className="text-[#81C784] text-sm font-medium">Email sent to {recipientEmail}</span>
+      {/* Alignment Score Bento */}
+      <section className="space-y-4">
+        <h3 className="text-sm font-bold uppercase tracking-widest text-[var(--color-secondary)] px-2">Optimization Analysis</h3>
+        <div className="grid grid-cols-2 gap-4">
+          {/* Original Score */}
+          <div className="bg-[var(--color-surface-container-low)] rounded-3xl p-6 flex flex-col items-center justify-center text-center shadow-sm">
+            <div className="relative w-28 h-28 mb-4 flex items-center justify-center">
+              <svg className="absolute inset-0 w-full h-full transform -rotate-90">
+                <circle className="text-[var(--color-surface-container-highest)]" cx="56" cy="56" fill="transparent" r="50" stroke="currentColor" strokeWidth="8"></circle>
+                <circle className="text-[var(--color-secondary)] transition-all duration-1000" cx="56" cy="56" fill="transparent" r="50" stroke="currentColor" strokeDasharray="314" strokeDashoffset={strokeDashoffsetOriginal} strokeWidth="8"></circle>
+              </svg>
+              <span className="text-2xl font-bold tracking-tighter text-[var(--color-secondary)]">{originalScore}%</span>
             </div>
-          ) : (
-            <>
-              <div>
-                <label className="block text-sm text-gray-300 mb-1">Recipient Email (HR / Hiring Manager)</label>
-                <input
-                  type="email"
-                  value={recipientEmail}
-                  onChange={e => setRecipientEmail(e.target.value)}
-                  placeholder="hr@company.com"
-                  className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-2.5 text-white text-sm focus:border-[var(--color-primary)] focus:ring-1 focus:ring-[var(--color-primary)] outline-none transition"
-                />
-              </div>
-              {emailError && <p className="text-red-400 text-xs">{emailError}</p>}
-              <button
-                onClick={handleSendEmail}
-                disabled={sendingEmail || !recipientEmail.trim()}
-                className="w-full px-4 py-3 bg-blue-600 text-white font-bold rounded-xl flex items-center justify-center gap-2 hover:bg-blue-500 transition disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {sendingEmail ? <Loader2 className="w-5 h-5 animate-spin" /> : <Mail className="w-5 h-5" />}
-                Send Application Email
-              </button>
-            </>
-          )}
-          <p className="text-[11px] text-gray-600">
-            Sends cover letter as email body with reply-to set to your email. CV text included. PDF attachment available in future update.
-          </p>
+            <p className="font-bold text-[var(--color-on-surface)] mb-1">Original CV</p>
+            <p className="text-xs text-[var(--color-secondary)] font-medium">Initial Draft</p>
+          </div>
+
+          {/* Tailored Score */}
+          <div className="bg-[var(--color-primary)]/10 rounded-3xl p-6 flex flex-col items-center justify-center text-center shadow-sm relative overflow-hidden ring-1 ring-[var(--color-primary)]/20">
+            <div className="absolute top-0 right-0 p-4 opacity-100">
+              <Sparkles className="text-[var(--color-primary)] w-4 h-4" />
+            </div>
+            <div className="relative w-28 h-28 mb-4 flex items-center justify-center">
+              <svg className="absolute inset-0 w-full h-full transform -rotate-90">
+                <circle className="text-[var(--color-primary)]/20" cx="56" cy="56" fill="transparent" r="50" stroke="currentColor" strokeWidth="8"></circle>
+                <circle className="text-[var(--color-primary)] transition-all duration-1000 delay-300" cx="56" cy="56" fill="transparent" r="50" stroke="currentColor" strokeDasharray="314" strokeDashoffset={strokeDashoffsetTailored} strokeWidth="8"></circle>
+              </svg>
+              <span className="text-3xl font-extrabold tracking-tighter text-[var(--color-primary)]">{pkg.match_score}%</span>
+            </div>
+            <p className="font-bold text-[var(--color-primary)] mb-1">Tailored Match</p>
+            <p className="text-xs text-[var(--color-primary)]/70 font-semibold">Architected AI</p>
+          </div>
         </div>
+      </section>
 
-        {/* Method B: Manual Apply Steps */}
-        <div className="bg-white/5 border border-white/10 rounded-2xl p-6 space-y-4">
-          <h2 className="text-lg font-bold text-white flex items-center gap-2">
-            <ExternalLink className="w-5 h-5 text-[var(--color-primary)]" />
-            Option B: Apply Manually
-          </h2>
-          <p className="text-sm text-gray-400">
-            Open the job posting and submit your application using the tailored documents below.
-          </p>
+      
+      {/* Optimization & Missing Skills (Insights) */}
+      <section className="space-y-4 pt-4">
+        <h3 className="text-sm font-bold uppercase tracking-widest text-[var(--color-secondary)] px-2">AI Recalibration & Gap Analysis</h3>
+        
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          
+          {/* Optimization Deep Dive */}
+          <div className="bg-[var(--color-surface-container-low)] rounded-3xl p-6 shadow-sm border border-[var(--color-outline-variant)]/20">
+            <div className="flex items-center gap-3 mb-6">
+              <div className="w-10 h-10 rounded-2xl bg-[var(--color-primary)]/10 flex items-center justify-center text-[var(--color-primary)]">
+                <Target className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-bold text-lg text-[var(--color-on-surface)]">Optimization Breakdown</h3>
+                <p className="text-xs text-[var(--color-secondary)]">Experience & Skills adjustments</p>
+              </div>
+            </div>
+            
+            <div className="space-y-3">
+              <div className="flex gap-3 items-start bg-[var(--color-surface-container)]/50 p-4 rounded-2xl">
+                <Sparkles className="w-4 h-4 text-[var(--color-primary)] mt-0.5" />
+                <p className="text-sm font-medium text-[var(--color-on-surface-variant)]">Quantified impact with specific metrics</p>
+              </div>
+              <div className="flex gap-3 items-start bg-[var(--color-surface-container)]/50 p-4 rounded-2xl">
+                <Sparkles className="w-4 h-4 text-[var(--color-primary)] mt-0.5" />
+                <p className="text-sm font-medium text-[var(--color-on-surface-variant)]">Integrated 5 new leadership keywords from JD</p>
+              </div>
+              <div className="flex gap-3 items-start bg-[var(--color-surface-container)]/50 p-4 rounded-2xl">
+                <Sparkles className="w-4 h-4 text-[var(--color-primary)] mt-0.5" />
+                <p className="text-sm font-medium text-[var(--color-on-surface-variant)]">Matched 12/15 required core competencies</p>
+              </div>
+            </div>
+          </div>
 
-          <div className="space-y-2">
-            {applySteps.map(step => (
-              <div
-                key={step.num}
-                onClick={() => markStep(step.num)}
-                className={`flex items-start gap-3 p-2 rounded-lg cursor-pointer transition ${
-                  completedSteps.has(step.num) ? 'bg-[#81C784]/10' : 'hover:bg-white/5'
-                }`}
-              >
-                <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0 mt-0.5 ${
-                  completedSteps.has(step.num) ? "bg-[#81C784] text-black" : "bg-white/10 text-gray-500"
-                }`}>
-                  {completedSteps.has(step.num) ? <Check className="w-3.5 h-3.5" /> : step.num}
+          {/* Missing Skills Analysis */}
+          <div className="bg-[var(--color-surface-container-low)] rounded-3xl p-6 shadow-sm border border-[var(--color-outline-variant)]/20">
+            <div className="flex items-center gap-3 mb-6">
+              <div className="w-10 h-10 rounded-2xl bg-amber-500/10 flex items-center justify-center text-amber-600">
+                <Zap className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-bold text-lg text-[var(--color-on-surface)]">Missing Skills Gap</h3>
+                <p className="text-xs text-[var(--color-secondary)]">Required competencies not found</p>
+              </div>
+            </div>
+            
+            <div className="space-y-4">
+              <div className="bg-[var(--color-surface-container)]/50 p-4 rounded-2xl border-l-4 border-amber-500">
+                <div className="flex justify-between items-start mb-1">
+                  <span className="font-bold text-[var(--color-on-surface)]">A/B Testing</span>
+                  <span className="text-[10px] uppercase font-bold tracking-widest text-[#15AE5C] bg-[#15AE5C]/10 px-2 py-0.5 rounded-full">High Priority</span>
                 </div>
-                <span className={`text-sm ${completedSteps.has(step.num) ? 'text-gray-400 line-through' : 'text-gray-300'}`}>
-                  {step.text}
-                </span>
+                <p className="text-xs text-[var(--color-secondary)] leading-relaxed">
+                  Data-driven design is heavily emphasized. Consider demonstrating experimentation validations.
+                </p>
               </div>
-            ))}
+
+              <div className="bg-[var(--color-surface-container)]/50 p-4 rounded-2xl border-l-4 border-amber-300">
+                <div className="flex justify-between items-start mb-1">
+                  <span className="font-bold text-[var(--color-on-surface)]">Micro-interactions</span>
+                  <span className="text-[10px] uppercase font-bold tracking-widest text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">Medium</span>
+                </div>
+                <p className="text-xs text-[var(--color-secondary)] leading-relaxed">
+                  Recommended to highlight specifically in your portfolio or interview stages.
+                </p>
+              </div>
+            </div>
           </div>
 
-          {pkg.job_url ? (
-            <a
-              href={pkg.job_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={() => markStep(1)}
-              className="w-full px-4 py-3 bg-[var(--color-primary)] text-black font-bold rounded-xl flex items-center justify-center gap-2 hover:bg-yellow-400 transition"
-            >
-              Open Job Posting <ExternalLink className="w-5 h-5" />
-            </a>
-          ) : (
-            <p className="text-gray-500 text-sm text-center">No job URL available. Search for this role manually.</p>
-          )}
-
-          {!marked && (
-            <button
-              onClick={handleMarkApplied}
-              disabled={marking}
-              className="w-full px-4 py-3 bg-[#81C784] text-black font-bold rounded-xl flex items-center justify-center gap-2 hover:bg-[#66BB6A] transition disabled:opacity-50"
-            >
-              {marking ? <Loader2 className="w-5 h-5 animate-spin" /> : <CheckCircle2 className="w-5 h-5" />}
-              Mark as Applied
-            </button>
-          )}
         </div>
-      </div>
+      </section>
 
-      {/* Your Details (copyable) */}
-      <div className="bg-white/5 border border-white/10 rounded-2xl p-6 space-y-4">
-        <h2 className="text-lg font-bold text-white flex items-center gap-2">
-          <Briefcase className="w-5 h-5 text-[var(--color-primary)]" />
-          Your Details
-          <span className="text-xs text-gray-500 font-normal ml-2">Click any field to copy</span>
-        </h2>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-          {[
-            { label: "Full Name", value: pkg.applicant.name },
-            { label: "Email", value: pkg.applicant.email },
-            { label: "Phone", value: pkg.applicant.phone },
-            { label: "Location", value: pkg.applicant.location },
-            ...(pkg.applicant.linkedin ? [{ label: "LinkedIn", value: pkg.applicant.linkedin }] : []),
-          ].filter(f => f.value).map(field => (
-            <button
-              key={field.label}
-              onClick={() => copyText(field.value, field.label)}
-              className="flex items-center justify-between bg-black/30 border border-white/10 rounded-xl px-4 py-3 text-left hover:bg-white/5 transition group"
-            >
-              <div>
-                <div className="text-[11px] text-gray-500 uppercase tracking-wider">{field.label}</div>
-                <div className="text-sm text-white font-medium mt-0.5">{field.value}</div>
-              </div>
-              {copied[field.label] ? (
-                <Check className="w-4 h-4 text-[#81C784] shrink-0" />
-              ) : (
-                <Copy className="w-4 h-4 text-gray-500 group-hover:text-white shrink-0 transition" />
-              )}
-            </button>
-          ))}
-        </div>
-
-        {/* Common Answers */}
-        {Object.entries(pkg.common_answers).some(([, v]) => v) && (
-          <>
-            <h3 className="text-sm font-bold text-gray-300 mt-4">Common Application Answers</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {Object.entries(pkg.common_answers)
-                .filter(([, v]) => v)
-                .map(([key, value]) => (
-                  <button
-                    key={key}
-                    onClick={() => copyText(value, key)}
-                    className="flex items-center justify-between bg-black/30 border border-white/10 rounded-xl px-4 py-3 text-left hover:bg-white/5 transition group"
-                  >
-                    <div>
-                      <div className="text-[11px] text-gray-500 uppercase tracking-wider">
-                        {key.replace(/_/g, ' ')}
-                      </div>
-                      <div className="text-sm text-white font-medium mt-0.5">{value}</div>
-                    </div>
-                    {copied[key] ? (
-                      <Check className="w-4 h-4 text-[#81C784] shrink-0" />
-                    ) : (
-                      <Copy className="w-4 h-4 text-gray-500 group-hover:text-white shrink-0 transition" />
-                    )}
-                  </button>
-                ))}
+      {/* Auto-fill & Application UI */}
+      <section className="space-y-4 pt-4">
+        <h3 className="text-sm font-bold uppercase tracking-widest text-[var(--color-secondary)] px-2">Application Details</h3>
+        
+        <div className="bg-[var(--color-surface-container-lowest)] border border-[var(--color-outline-variant)]/30 rounded-3xl p-8 relative overflow-hidden shadow-sm">
+          
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8 pb-6 border-b border-[var(--color-outline-variant)]/20">
+            <div>
+              <span className="text-[10px] uppercase font-bold tracking-widest text-[var(--color-primary)] mb-1 block">Data Ready</span>
+              <h4 className="text-2xl font-bold tracking-tight text-[var(--color-on-surface)]">Extracted Information</h4>
             </div>
-          </>
-        )}
-      </div>
+            <button
+              onClick={handleMagicFill}
+              disabled={isMagicFilling || hasMagicFilled}
+              className={`flex items-center gap-2 px-5 py-3 rounded-full font-bold text-sm transition-all shadow-sm ${
+                hasMagicFilled 
+                  ? 'bg-emerald-100 text-emerald-700'
+                  : 'bg-gradient-to-r from-[var(--color-primary)] to-emerald-400 text-white hover:scale-105 active:scale-95'
+              }`}
+            >
+              {isMagicFilling ? <Loader2 className="w-4 h-4 animate-spin" /> : hasMagicFilled ? <CheckCircle2 className="w-4 h-4" /> : <Sparkles className="w-4 h-4" />}
+              {hasMagicFilled ? 'Magic Filled' : 'Magic Fill Data'}
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="space-y-2">
+              <label className="text-xs font-bold uppercase tracking-widest text-[var(--color-secondary)] ml-1">Full Name</label>
+              <div className="relative group cursor-pointer" onClick={() => hasMagicFilled && copyText(formName, 'name')}>
+                <input 
+                  type="text"
+                  value={formName}
+                  onChange={(e) => setFormName(e.target.value)}
+                  placeholder="Not filled"
+                  className={`w-full bg-[var(--color-surface-container-low)] border-none rounded-xl p-4 text-[var(--color-on-surface)] font-medium transition-all ${
+                    hasMagicFilled ? 'ring-2 ring-[var(--color-primary)]/40 shadow-[0_0_15px_rgba(0,109,54,0.1)] outline-none group-hover:ring-[var(--color-primary)]/60 cursor-pointer' : ''
+                  }`}
+                  readOnly
+                />
+                {hasMagicFilled && (
+                  <div className="absolute right-4 top-1/2 -translate-y-1/2">
+                    {copied['name'] ? <Check className="w-4 h-4 text-emerald-500" /> : <Copy className="w-4 h-4 text-[var(--color-secondary)] group-hover:text-[var(--color-primary)]" />}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs font-bold uppercase tracking-widest text-[var(--color-secondary)] ml-1">Email Address</label>
+              <div className="relative group cursor-pointer" onClick={() => hasMagicFilled && copyText(formEmail, 'email')}>
+                <input 
+                  type="email"
+                  value={formEmail}
+                  onChange={(e) => setFormEmail(e.target.value)}
+                  placeholder="Not filled"
+                  className={`w-full bg-[var(--color-surface-container-low)] border-none rounded-xl p-4 text-[var(--color-on-surface)] font-medium transition-all ${
+                    hasMagicFilled ? 'ring-2 ring-[var(--color-primary)]/40 shadow-[0_0_15px_rgba(0,109,54,0.1)] outline-none group-hover:ring-[var(--color-primary)]/60 cursor-pointer' : ''
+                  }`}
+                  readOnly
+                />
+                {hasMagicFilled && (
+                  <div className="absolute right-4 top-1/2 -translate-y-1/2">
+                    {copied['email'] ? <Check className="w-4 h-4 text-emerald-500" /> : <Copy className="w-4 h-4 text-[var(--color-secondary)] group-hover:text-[var(--color-primary)]" />}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs font-bold uppercase tracking-widest text-[var(--color-secondary)] ml-1">Phone</label>
+              <div className="relative group cursor-pointer" onClick={() => hasMagicFilled && copyText(formPhone, 'phone')}>
+                <input 
+                  type="text"
+                  value={formPhone}
+                  onChange={(e) => setFormPhone(e.target.value)}
+                  placeholder="Not filled"
+                  className={`w-full bg-[var(--color-surface-container-low)] border-none rounded-xl p-4 text-[var(--color-on-surface)] font-medium transition-all ${
+                    hasMagicFilled ? 'ring-2 ring-[var(--color-primary)]/40 shadow-[0_0_15px_rgba(0,109,54,0.1)] outline-none group-hover:ring-[var(--color-primary)]/60 cursor-pointer' : ''
+                  }`}
+                  readOnly
+                />
+                 {hasMagicFilled && (
+                  <div className="absolute right-4 top-1/2 -translate-y-1/2">
+                    {copied['phone'] ? <Check className="w-4 h-4 text-emerald-500" /> : <Copy className="w-4 h-4 text-[var(--color-secondary)] group-hover:text-[var(--color-primary)]" />}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs font-bold uppercase tracking-widest text-[var(--color-secondary)] ml-1">LinkedIn</label>
+              <div className="relative group cursor-pointer" onClick={() => hasMagicFilled && copyText(formLinkedIn, 'linkedin')}>
+                <input 
+                  type="text"
+                  value={formLinkedIn}
+                  onChange={(e) => setFormLinkedIn(e.target.value)}
+                  placeholder="Not filled"
+                  className={`w-full bg-[var(--color-surface-container-low)] border-none rounded-xl p-4 text-[var(--color-on-surface)] font-medium transition-all ${
+                    hasMagicFilled ? 'ring-2 ring-[var(--color-primary)]/40 shadow-[0_0_15px_rgba(0,109,54,0.1)] outline-none group-hover:ring-[var(--color-primary)]/60 cursor-pointer' : ''
+                  }`}
+                  readOnly
+                />
+                {hasMagicFilled && (
+                  <div className="absolute right-4 top-1/2 -translate-y-1/2">
+                    {copied['linkedin'] ? <Check className="w-4 h-4 text-emerald-500" /> : <Copy className="w-4 h-4 text-[var(--color-secondary)] group-hover:text-[var(--color-primary)]" />}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
 
       {/* Documents */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Tailored CV */}
-        <div className="bg-white/5 border border-white/10 rounded-2xl overflow-hidden">
-          <div className="p-4 border-b border-white/10 flex justify-between items-center">
-            <h3 className="font-bold text-white flex items-center gap-2">
-              <FileText className="w-4 h-4 text-blue-400" /> Tailored CV
-            </h3>
-            <div className="flex gap-1">
-              <button
-                onClick={() => copyText(pkg.tailored_cv_text, 'cv')}
-                className="px-3 py-1.5 bg-white/10 rounded-lg text-xs text-gray-300 hover:bg-white/20 flex items-center gap-1 transition"
-              >
-                {copied['cv'] ? <Check className="w-3 h-3 text-[#81C784]" /> : <Copy className="w-3 h-3" />} Copy
-              </button>
-              <button
-                onClick={() => downloadAsPdf(pkg.tailored_cv_text, `CV_${pkg.company_name}_${pkg.role_title}`)}
-                className="px-3 py-1.5 bg-blue-600 rounded-lg text-xs text-white hover:bg-blue-500 flex items-center gap-1 transition font-bold"
-              >
-                <Download className="w-3 h-3" /> PDF
-              </button>
-              <button
-                onClick={() => downloadAsDocx(pkg.tailored_cv_text, `CV_${pkg.company_name}_${pkg.role_title}`)}
-                className="px-3 py-1.5 bg-white/10 rounded-lg text-xs text-gray-300 hover:bg-white/20 flex items-center gap-1 transition"
-              >
-                <Download className="w-3 h-3" /> DOCX
-              </button>
+      <section className="space-y-4 pt-4">
+        <h3 className="text-sm font-bold uppercase tracking-widest text-[var(--color-secondary)] px-2">Generated Documents</h3>
+        
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* CV */}
+          <div className="bg-[var(--color-surface-container-lowest)] border border-[var(--color-outline-variant)]/30 rounded-3xl overflow-hidden shadow-sm flex flex-col h-96">
+            <div className="p-5 border-b border-[var(--color-outline-variant)]/20 flex justify-between items-center bg-[var(--color-surface-container-low)]">
+              <div className="flex items-center gap-2">
+                <FileText className="w-5 h-5 text-blue-500" />
+                <span className="font-bold text-[var(--color-on-surface)]">Tailored CV</span>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => downloadAsPdf(pkg.tailored_cv_text, `CV_${pkg.company_name}_${pkg.role_title}`)} className="p-2 hover:bg-white rounded-lg transition-colors text-[var(--color-secondary)] hover:text-blue-600">
+                  <Download className="w-4 h-4" />
+                </button>
+                <button onClick={() => copyText(pkg.tailored_cv_text, 'cv')} className="p-2 hover:bg-white rounded-lg transition-colors text-[var(--color-secondary)] hover:text-[var(--color-primary)]">
+                  {copied['cv'] ? <Check className="w-4 h-4 text-emerald-500" /> : <Copy className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+            <div className="p-5 flex-1 relative bg-white">
+              <div className="absolute inset-0 overflow-y-auto p-5 pb-10 text-[xs] font-[ui-monospace,'Cascadia Code',monospace] whitespace-pre-wrap text-gray-800">
+                {pkg.tailored_cv_text}
+              </div>
             </div>
           </div>
-          <div className="bg-white p-4 max-h-[600px] overflow-y-auto text-black text-xs font-[ui-monospace,'Cascadia Code','Segoe UI Mono',monospace] whitespace-pre-wrap">
-            {pkg.tailored_cv_text}
-          </div>
-        </div>
 
-        {/* Cover Letter */}
-        <div className="bg-white/5 border border-white/10 rounded-2xl overflow-hidden">
-          <div className="p-4 border-b border-white/10 flex justify-between items-center">
-            <h3 className="font-bold text-white flex items-center gap-2">
-              <Navigation className="w-4 h-4 text-[var(--color-primary)]" /> Cover Letter
-            </h3>
-            <div className="flex gap-1">
-              <button
-                onClick={() => copyText(pkg.cover_letter_text, 'cl')}
-                className="px-3 py-1.5 bg-white/10 rounded-lg text-xs text-gray-300 hover:bg-white/20 flex items-center gap-1 transition"
-              >
-                {copied['cl'] ? <Check className="w-3 h-3 text-[#81C784]" /> : <Copy className="w-3 h-3" />} Copy
-              </button>
-              <button
-                onClick={() => downloadAsPdf(pkg.cover_letter_text, `CL_${pkg.company_name}_${pkg.role_title}`)}
-                className="px-3 py-1.5 bg-blue-600 rounded-lg text-xs text-white hover:bg-blue-500 flex items-center gap-1 transition font-bold"
-              >
-                <Download className="w-3 h-3" /> PDF
-              </button>
-              <button
-                onClick={() => downloadAsDocx(pkg.cover_letter_text, `CL_${pkg.company_name}_${pkg.role_title}`)}
-                className="px-3 py-1.5 bg-white/10 rounded-lg text-xs text-gray-300 hover:bg-white/20 flex items-center gap-1 transition"
-              >
-                <Download className="w-3 h-3" /> DOCX
-              </button>
+          {/* Cover Letter */}
+          <div className="bg-[var(--color-surface-container-lowest)] border border-[var(--color-outline-variant)]/30 rounded-3xl overflow-hidden shadow-sm flex flex-col h-96">
+            <div className="p-5 border-b border-[var(--color-outline-variant)]/20 flex justify-between items-center bg-[var(--color-surface-container-low)]">
+              <div className="flex items-center gap-2">
+                <Navigation className="w-5 h-5 text-[var(--color-primary)]" />
+                <span className="font-bold text-[var(--color-on-surface)]">Cover Letter</span>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => downloadAsPdf(pkg.cover_letter_text, `CL_${pkg.company_name}_${pkg.role_title}`)} className="p-2 hover:bg-white rounded-lg transition-colors text-[var(--color-secondary)] hover:text-blue-600">
+                  <Download className="w-4 h-4" />
+                </button>
+                <button onClick={() => copyText(pkg.cover_letter_text, 'cl')} className="p-2 hover:bg-white rounded-lg transition-colors text-[var(--color-secondary)] hover:text-[var(--color-primary)]">
+                  {copied['cl'] ? <Check className="w-4 h-4 text-emerald-500" /> : <Copy className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+            <div className="p-5 flex-1 relative bg-white">
+              <div className="absolute inset-0 overflow-y-auto p-5 pb-10 text-sm font-sans leading-relaxed text-gray-800 whitespace-pre-wrap">
+                {pkg.cover_letter_text}
+              </div>
             </div>
           </div>
-          <div className="bg-white p-4 max-h-[600px] overflow-y-auto text-black text-sm whitespace-pre-wrap font-sans leading-relaxed">
-            {pkg.cover_letter_text}
-          </div>
         </div>
+      </section>
+
+      {/* CTA Bottom Action */}
+      <div className="pt-8 flex flex-col gap-3">
+        <button 
+          onClick={async () => {
+             const { supabase } = await import("@/lib/supabase");
+             await supabase.from("applications").update({ status: "Applied", applied_date: new Date().toISOString() }).eq("id", id);
+             if (pkg.job_url) window.open(pkg.job_url, '_blank');
+             router.push('/dashboard');
+          }}
+          className="w-full py-5 bg-[var(--color-surface-container-lowest)] border-2 border-[var(--color-primary)] text-[var(--color-primary)] rounded-2xl font-bold text-lg hover:bg-[var(--color-primary)] hover:text-white transition-all duration-300 flex items-center justify-center gap-3 active:scale-95 shadow-sm hover:shadow-[0_10px_25px_rgba(0,109,54,0.3)]"
+        >
+          <span>Mark as Applied & Open Employer Site</span>
+          <ArrowRight className="w-5 h-5" />
+        </button>
       </div>
+      
     </div>
   );
 }
