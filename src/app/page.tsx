@@ -97,11 +97,25 @@ function Section({
 function Nav() {
   const [scrolled, setScrolled] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [loggedIn, setLoggedIn] = useState(false);
 
   useEffect(() => {
     const handler = () => setScrolled(window.scrollY > 20);
     window.addEventListener("scroll", handler);
     return () => window.removeEventListener("scroll", handler);
+  }, []);
+
+  // Detect session without touching it — never signs the user out
+  useEffect(() => {
+    import("@/lib/supabase").then(({ supabase }) => {
+      supabase.auth.getSession().then(({ data }) => {
+        setLoggedIn(!!data.session?.user);
+      });
+      const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+        setLoggedIn(!!session?.user);
+      });
+      return () => listener.subscription.unsubscribe();
+    });
   }, []);
 
   return (
@@ -136,18 +150,29 @@ function Nav() {
 
         {/* CTAs */}
         <div className="hidden md:flex items-center gap-3">
-          <Link
-            href="/login"
-            className="text-sm text-white/60 hover:text-white transition-colors px-3 py-1.5"
-          >
-            Log in
-          </Link>
-          <Link
-            href="/signup"
-            className="text-sm font-semibold bg-[#F5C518] text-[#08080A] px-4 py-2 rounded-full hover:bg-[#f5c518]/90 transition-all hover:scale-[1.03] active:scale-95"
-          >
-            Get Started Free
-          </Link>
+          {loggedIn ? (
+            <Link
+              href="/dashboard"
+              className="text-sm font-semibold bg-[#F5C518] text-[#08080A] px-4 py-2 rounded-full hover:bg-[#f5c518]/90 transition-all hover:scale-[1.03] active:scale-95"
+            >
+              Go to Dashboard →
+            </Link>
+          ) : (
+            <>
+              <Link
+                href="/login"
+                className="text-sm text-white/60 hover:text-white transition-colors px-3 py-1.5"
+              >
+                Log in
+              </Link>
+              <Link
+                href="/signup"
+                className="text-sm font-semibold bg-[#F5C518] text-[#08080A] px-4 py-2 rounded-full hover:bg-[#f5c518]/90 transition-all hover:scale-[1.03] active:scale-95"
+              >
+                Get Started Free
+              </Link>
+            </>
+          )}
         </div>
 
         {/* Mobile burger */}
@@ -183,12 +208,22 @@ function Nav() {
                 {item}
               </a>
             ))}
-            <Link
-              href="/signup"
-              className="block text-center font-semibold bg-[#F5C518] text-[#08080A] px-4 py-2.5 rounded-full"
-            >
-              Get Started Free
-            </Link>
+            {loggedIn ? (
+              <Link
+                href="/dashboard"
+                onClick={() => setMobileOpen(false)}
+                className="block text-center font-semibold bg-[#F5C518] text-[#08080A] px-4 py-2.5 rounded-full"
+              >
+                Go to Dashboard →
+              </Link>
+            ) : (
+              <Link
+                href="/signup"
+                className="block text-center font-semibold bg-[#F5C518] text-[#08080A] px-4 py-2.5 rounded-full"
+              >
+                Get Started Free
+              </Link>
+            )}
           </motion.div>
         )}
       </AnimatePresence>
