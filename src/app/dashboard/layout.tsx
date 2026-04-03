@@ -28,7 +28,7 @@ export default async function DashboardLayout({
         <div className="flex flex-col md:flex-row items-center gap-6">
           <div className="flex items-center gap-2">
             <Sparkles className="text-[var(--color-primary)] w-5 h-5" />
-            <Link href="/dashboard" className="font-heading text-xl font-bold text-white">
+            <Link href="/" className="font-heading text-xl font-bold text-white">
               AutoApply
             </Link>
           </div>
