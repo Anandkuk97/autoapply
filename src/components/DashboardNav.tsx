@@ -16,7 +16,7 @@ export function DashboardNav() {
   ];
 
   return (
-    <nav className="fixed bottom-0 left-0 w-full z-50 bg-black/60 backdrop-blur-3xl rounded-t-[3.5rem] shadow-[0_-10px_80px_rgba(0,0,0,0.8)] border-t border-white/5 flex justify-around items-center px-4 pb-12 pt-6">
+    <nav className="fixed bottom-10 left-1/2 -translate-x-1/2 w-[90%] max-w-2xl z-50 bg-white/70 backdrop-blur-3xl rounded-[2.5rem] shadow-[0_10px_50px_rgba(0,0,0,0.1)] border border-white/50 flex justify-around items-center px-4 py-4">
       {navItems.map((item) => {
         const isActive = pathname === item.href;
         const Icon = item.icon;
@@ -25,17 +25,20 @@ export function DashboardNav() {
           <Link 
             key={item.label}
             href={item.href} 
-            className={`flex flex-col items-center justify-center rounded-2xl px-6 py-2 transition-all active:scale-95 duration-300 group ${
+            className={`flex flex-col items-center justify-center rounded-2xl px-5 py-2 transition-all active:scale-95 duration-300 group ${
               isActive 
-                ? "bg-[var(--color-primary)]/10 text-[var(--color-primary)]" 
-                : "text-zinc-400 hover:text-[var(--color-primary)]"
+                ? "text-[var(--color-primary)]" 
+                : "text-slate-400 hover:text-slate-900"
             }`}
           >
-            <Icon className={`mb-1 w-6 h-6 ${isActive ? "fill-current" : "group-hover:drop-shadow-md"}`} />
-            <span className="text-[10px] font-black uppercase tracking-[0.2em]">{item.label}</span>
+            <Icon className={`mb-1 w-5 h-5 ${isActive ? "fill-current" : ""}`} />
+            <span className={`text-[9px] font-black uppercase tracking-[0.2em] transition-colors ${isActive ? "text-[var(--color-primary)]" : "text-slate-400"}`}>
+              {item.label}
+            </span>
           </Link>
         );
       })}
     </nav>
+
   );
 }

@@ -126,17 +126,18 @@ export default function TailorPage() {
   };
 
   return (
-    <div className="max-w-2xl mx-auto space-y-12 pb-20">
+    <div className="max-w-4xl mx-auto space-y-6 pb-20">
       
       {/* HEADER SECTION */}
-      <header className="space-y-2 text-center sm:text-left">
-        <h2 className="text-[4rem] font-black leading-[1] tracking-tighter text-[var(--color-on-surface)]">
+      <header className="space-y-1 text-center sm:text-left">
+        <h2 className="text-5xl font-black leading-tight tracking-tighter text-slate-900">
           Queue.
         </h2>
-        <p className="text-[var(--color-secondary)] text-[12px] tracking-[0.3em] uppercase font-bold">
+        <p className="text-[var(--color-secondary)] text-[10px] tracking-[0.4em] uppercase font-black opacity-40">
           Neural Selection Results
         </p>
       </header>
+
 
       {loading ? (
         <div className="flex flex-col items-center justify-center py-20 gap-4">

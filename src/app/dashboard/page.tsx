@@ -56,21 +56,22 @@ export default function DetectPage() {
   };
 
   return (
-    <div className="max-w-2xl mx-auto space-y-12 pb-20">
+    <div className="max-w-4xl mx-auto space-y-6 pb-20">
       
       {/* HEADER SECTION */}
-      <header className="space-y-2 text-center sm:text-left">
+      <header className="space-y-1 text-center sm:text-left">
         <motion.h2 
-          initial={{ opacity: 0, y: 20 }}
+          initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          className="text-[4.5rem] font-black leading-[0.9] tracking-tighter text-[var(--color-on-surface)]"
+          className="text-5xl font-black leading-tight tracking-tighter text-slate-900"
         >
           {isSearching ? "Scanning." : "Detecting."}
         </motion.h2>
-        <p className="text-[var(--color-secondary)] text-[12px] tracking-[0.3em] uppercase font-bold opacity-80">
+        <p className="text-[var(--color-secondary)] text-[10px] tracking-[0.4em] uppercase font-black opacity-40">
           {isSearching ? "Neural Network Active" : "Active Intelligence Engine"}
         </p>
       </header>
+
 
       {/* SEARCH CARD */}
       <section className="bg-[var(--color-surface-container-lowest)] border border-[var(--color-outline-variant)]/20 p-8 rounded-[3rem] shadow-2xl shadow-[var(--color-primary)]/5 space-y-8 relative overflow-hidden group">

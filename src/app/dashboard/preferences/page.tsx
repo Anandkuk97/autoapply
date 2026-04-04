@@ -232,11 +232,12 @@ export default function PreferencesPage() {
   const availableRoleSuggestions = recentRoles.filter(r => !targetRoles.includes(r));
 
   return (
-    <div className="max-w-3xl mx-auto space-y-12 animate-in fade-in slide-in-from-bottom-4 duration-1000 pb-20">
-      <header className="space-y-2">
-        <h2 className="text-[4rem] font-black leading-[1] tracking-tighter text-slate-900">Targets.</h2>
-        <p className="text-slate-500 text-[12px] tracking-[0.3em] uppercase font-black opacity-60">Neural Matching Calibration</p>
+    <div className="max-w-4xl mx-auto space-y-6 pb-20 animate-in fade-in slide-in-from-bottom-4 duration-1000">
+      <header className="space-y-1">
+        <h2 className="text-5xl font-black leading-tight tracking-tighter text-slate-900">Targets.</h2>
+        <p className="text-slate-500 text-[10px] tracking-[0.4em] uppercase font-black opacity-40">Neural Matching Calibration</p>
       </header>
+
 
       {error && (
         <div className="bg-red-50 border border-red-100 text-red-600 px-6 py-4 rounded-2xl text-sm font-black flex items-center gap-3">
