@@ -90,53 +90,55 @@ export default function TailorPage() {
         animate={{ opacity: 1, x: 0 }}
         transition={{ delay: index * 0.05 }}
         onClick={() => toggleJobSelection(id)}
-        className="group cursor-pointer flex items-center justify-between p-8 bg-[var(--color-surface-container-lowest)] rounded-[2.5rem] border border-[var(--color-outline-variant)]/10 shadow-sm hover:shadow-2xl hover:bg-[var(--color-surface-container-low)] transition-all duration-500 overflow-hidden relative"
+        className="group cursor-pointer flex items-center justify-between p-5 bg-white rounded-[1.5rem] border border-black/5 shadow-sm hover:shadow-xl hover:border-emerald-500/30 transition-all duration-500 overflow-hidden relative"
       >
-        <div className="flex items-center gap-6 relative z-10">
-          <div className={`w-16 h-16 rounded-2xl border-2 flex items-center justify-center transition-all duration-500 ${
+        <div className="flex items-center gap-4 relative z-10">
+          <div className={`w-12 h-12 rounded-xl border-2 flex items-center justify-center transition-all duration-500 ${
             selectedJobs.has(id) 
-              ? "bg-[var(--color-primary)] border-transparent text-white shadow-xl shadow-[var(--color-primary)]/30" 
-              : "bg-white border-slate-200 text-slate-300 shadow-sm"
+              ? "bg-emerald-600 border-transparent text-white shadow-lg shadow-emerald-200" 
+              : "bg-slate-50 border-slate-200 text-slate-300 shadow-sm"
           }`}>
             {selectedJobs.has(id) ? (
-              <Check className="w-8 h-8 stroke-[4px] animate-in zoom-in-50 duration-300" />
+              <Check className="w-6 h-6 stroke-[4px] animate-in zoom-in-50 duration-300" />
             ) : (
-              <div className="w-4 h-4 rounded-full border-2 border-slate-300 group-hover:border-[var(--color-primary)] transition-colors" />
+              <div className="w-3 h-3 rounded-full border-2 border-slate-300 group-hover:border-emerald-500 transition-colors" />
             )}
           </div>
           <div>
-            <div className="flex items-center gap-3 mb-1">
-              <p className="font-black text-slate-900 text-xl leading-tight tracking-tight">{job.title}</p>
+            <div className="flex items-center gap-3 mb-0.5">
+              <p className="font-black text-slate-900 text-lg leading-tight tracking-tight">{job.title}</p>
               {job.is_sponsorship && (
-                <span className="px-2 py-0.5 bg-[var(--color-tertiary-container)] text-[var(--color-on-tertiary-fixed-variant)] text-[9px] font-black uppercase rounded-md tracking-widest animate-pulse shadow-sm border border-[var(--color-tertiary-container)]">
-                  Sponsorship Available
+                <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 text-[8px] font-black uppercase rounded-md tracking-widest shadow-sm border border-emerald-100">
+                  Sponsorship
                 </span>
               )}
             </div>
-            <div className="flex items-center gap-3 mt-1.5">
-              <p className="text-sm text-[var(--color-primary)] font-black">{job.company}</p>
-              <span className="w-1.5 h-1.5 rounded-full bg-slate-300" />
-              <p className="text-sm text-slate-700 font-bold">{job.location}</p>
+            <div className="flex items-center gap-2 mt-1">
+              <p className="text-xs text-emerald-600 font-black">{job.company}</p>
+              <span className="w-1 h-1 rounded-full bg-slate-300" />
+              <p className="text-xs text-slate-500 font-bold">{job.location}</p>
             </div>
           </div>
         </div>
-        <ChevronRight className="w-8 h-8 text-slate-400 group-hover:text-slate-900 group-hover:translate-x-2 transition-all duration-500" />
+        <ChevronRight className="w-6 h-6 text-slate-300 group-hover:text-slate-900 group-hover:translate-x-1 transition-all duration-500" />
       </motion.div>
+
     );
   };
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6 pb-20">
+    <div className="max-w-4xl mx-auto space-y-4 pb-20">
       
       {/* HEADER SECTION */}
       <header className="space-y-1 text-center sm:text-left">
-        <h2 className="text-5xl font-black leading-tight tracking-tighter text-slate-900">
+        <h2 className="text-4xl font-black leading-tight tracking-tighter text-slate-900">
           Queue.
         </h2>
         <p className="text-[var(--color-secondary)] text-[10px] tracking-[0.4em] uppercase font-black opacity-40">
           Neural Selection Results
         </p>
       </header>
+
 
 
       {loading ? (

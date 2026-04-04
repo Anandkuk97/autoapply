@@ -56,17 +56,18 @@ export default function DetectPage() {
   };
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6 pb-20">
+    <div className="max-w-4xl mx-auto space-y-4 pb-20">
       
       {/* HEADER SECTION */}
       <header className="space-y-1 text-center sm:text-left">
         <motion.h2 
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          className="text-5xl font-black leading-tight tracking-tighter text-slate-900"
+          className="text-4xl font-black leading-tight tracking-tighter text-slate-900"
         >
           {isSearching ? "Scanning." : "Detecting."}
         </motion.h2>
+
         <p className="text-[var(--color-secondary)] text-[10px] tracking-[0.4em] uppercase font-black opacity-40">
           {isSearching ? "Neural Network Active" : "Active Intelligence Engine"}
         </p>
@@ -74,28 +75,25 @@ export default function DetectPage() {
 
 
       {/* SEARCH CARD */}
-      <section className="bg-[var(--color-surface-container-lowest)] border border-[var(--color-outline-variant)]/20 p-8 rounded-[3rem] shadow-2xl shadow-[var(--color-primary)]/5 space-y-8 relative overflow-hidden group">
-        <div className="flex items-center gap-6">
-          <div className="w-20 h-20 rounded-[2rem] bg-[var(--color-primary)]/10 flex items-center justify-center shrink-0 border border-[var(--color-primary)]/20 transition-transform group-hover:scale-105 duration-500">
-            <Search className="text-[var(--color-primary)] w-10 h-10" />
+      <section className="bg-white border border-black/5 p-6 rounded-[2rem] shadow-xl shadow-black/5 space-y-6 relative overflow-hidden group">
+        <div className="flex items-center gap-4">
+          <div className="w-12 h-12 bg-emerald-50 rounded-2xl flex items-center justify-center text-emerald-600 shadow-sm transition-transform group-hover:scale-110">
+            <Search className="w-6 h-6" />
           </div>
           <div>
-            <h2 className="text-3xl font-black text-[var(--color-on-surface)] tracking-tight">Market Radar</h2>
-            <p className="text-[var(--color-secondary)] font-medium">Auto-scan 50+ job boards for your profile.</p>
+            <h3 className="text-xl font-black text-slate-900 tracking-tight">Market Radar</h3>
+            <p className="text-sm text-slate-500 font-medium tracking-tight">Auto-scan 50+ job boards for your profile.</p>
           </div>
         </div>
 
-        {/* Preferences bar */}
-        <div className="bg-[var(--color-surface-container-low)] rounded-2xl p-6 flex flex-col sm:flex-row items-center justify-between gap-4 border border-[var(--color-outline-variant)]/10">
+        <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-black/5">
           <div className="flex items-center gap-3">
-            <div className="w-2.5 h-2.5 rounded-full bg-[var(--color-primary)] animate-pulse" />
-            <span className="text-sm font-bold text-[var(--color-on-surface)]">
-              {userProfile?.target_roles?.length 
-                ? userProfile.target_roles.join(", ")
-                : "Initialize preferences to start"}
-            </span>
+            <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            <p className="text-xs font-black text-slate-700 uppercase tracking-widest truncate max-w-[200px]">
+              {userProfile?.target_roles?.join(", ") || "No roles defined"}
+            </p>
           </div>
-          <Link href="/dashboard/preferences" className="text-xs font-black text-[var(--color-primary)] hover:underline uppercase tracking-widest bg-[var(--color-primary)]/10 px-4 py-2 rounded-lg transition-colors">
+          <Link href="/dashboard/preferences" className="px-4 py-2 bg-white text-emerald-600 border border-emerald-100 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-50 transition-colors shadow-sm">
             Configure
           </Link>
         </div>
@@ -103,43 +101,43 @@ export default function DetectPage() {
         <button
           onClick={handleSearchJobs}
           disabled={isSearching || !userProfile?.target_roles?.length}
-          className="w-full h-24 bg-gradient-to-br from-[var(--color-primary)] to-[var(--color-primary-container)] text-[var(--color-on-primary)] rounded-[2rem] font-black text-2xl shadow-2xl shadow-[var(--color-primary)]/40 active:scale-[0.98] transition-all duration-500 flex items-center justify-center gap-4 disabled:opacity-30 group relative overflow-hidden"
+          className="w-full h-16 bg-emerald-600 text-white rounded-2xl font-black text-lg shadow-xl shadow-emerald-200 active:scale-[0.98] transition-all duration-500 flex items-center justify-center gap-3 disabled:opacity-30 group relative overflow-hidden"
         >
-          <div className="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-500" />
-          <span className="relative z-10 flex items-center gap-4">
+          <div className="absolute inset-0 bg-white/10 translate-y-full group-hover:translate-y-0 transition-transform duration-500" />
+          <span className="relative z-10 flex items-center gap-3">
             {isSearching ? (
-              <>INITIALIZING... <Loader2 className="w-8 h-8 animate-spin" /></>
+              <>INITIALIZING... <Loader2 className="w-6 h-6 animate-spin" /></>
             ) : (
-              <>START SCANNING <Zap className="w-8 h-8 group-hover:fill-current" /></>
+              <>START SCANNING <Zap className="w-6 h-6 group-hover:fill-current" /></>
             )}
           </span>
         </button>
       </section>
 
       {/* QUICK STATS BENTO */}
-      <div className="grid grid-cols-2 gap-6">
-        <div className="bg-[var(--color-surface-container-low)] p-8 rounded-[2.5rem] border border-[var(--color-outline-variant)]/10 hover:border-[var(--color-primary)]/30 transition-colors group">
-          <div className="w-12 h-12 bg-white/5 rounded-2xl flex items-center justify-center shadow-sm mb-4 group-hover:scale-110 transition-transform">
-            <FileText className="w-6 h-6 text-[var(--color-primary)]" />
+      <div className="grid grid-cols-2 gap-4">
+        <div className="bg-white p-6 rounded-[2rem] border border-black/5 hover:border-emerald-500/30 transition-colors group shadow-sm">
+          <div className="w-10 h-10 bg-slate-50 rounded-xl flex items-center justify-center shadow-sm mb-3 group-hover:scale-110 transition-transform">
+            <FileText className="w-5 h-5 text-emerald-600" />
           </div>
-          <p className="text-4xl font-black text-[var(--color-on-surface)]">{applications.length}</p>
-          <p className="text-[11px] uppercase font-black tracking-[0.2em] text-[var(--color-secondary)] opacity-50 mt-1">Detections</p>
+          <p className="text-2xl font-black text-slate-900">{applications.length}</p>
+          <p className="text-[9px] uppercase font-black tracking-[0.2em] text-slate-400 mt-1">Detections</p>
         </div>
-        <div className="bg-[var(--color-surface-container-low)] p-8 rounded-[2.5rem] border border-[var(--color-outline-variant)]/10 hover:border-[var(--color-cta)]/30 transition-colors group">
-          <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center shadow-sm mb-4 group-hover:scale-110 transition-transform">
-            <TrendingUp className="w-6 h-6 text-[var(--color-primary)]" />
+        <div className="bg-white p-6 rounded-[2rem] border border-black/5 hover:border-emerald-500/30 transition-colors group shadow-sm">
+          <div className="w-10 h-10 bg-slate-50 rounded-xl flex items-center justify-center shadow-sm mb-3 group-hover:scale-110 transition-transform">
+            <TrendingUp className="w-5 h-5 text-emerald-600" />
           </div>
-          <p className="text-4xl font-black text-[var(--color-on-surface)]">{hitRate}%</p>
-          <p className="text-[11px] uppercase font-black tracking-[0.2em] text-[var(--color-secondary)] opacity-50 mt-1">Avg Match</p>
+          <p className="text-2xl font-black text-slate-900">{hitRate}%</p>
+          <p className="text-[9px] uppercase font-black tracking-[0.2em] text-slate-400 mt-1">Avg Match</p>
         </div>
       </div>
 
       {/* WORKFLOW GUIDE (for new/incomplete users) */}
       {(!userProfile?.cv_text || !userProfile?.target_roles?.length) && (
-        <section className="bg-[var(--color-primary)]/[0.03] border border-[var(--color-primary)]/10 p-8 rounded-[2.5rem] space-y-6">
-          <h3 className="text-lg font-black text-[var(--color-on-surface)] flex items-center gap-3">
-            <Sparkles className="w-6 h-6 text-[var(--color-primary)]" />
-            Onboarding Checklist
+        <section className="bg-emerald-50 border border-emerald-100 p-6 rounded-[2rem] space-y-4">
+          <h3 className="text-base font-black text-slate-900 flex items-center gap-2">
+            <Sparkles className="w-5 h-5 text-emerald-600" />
+            Checklist
           </h3>
           <div className="space-y-4">
             {[
