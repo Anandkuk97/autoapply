@@ -51,27 +51,43 @@ async function searchAdzuna(
     }
 
     const data = await res.json();
-    const results: JobListing[] = (data.results || []).map((job: any) => ({
-      id: `adzuna-${job.id}`,
-      title: job.title || '',
-      company: job.company?.display_name || 'Unknown Company',
-      location: job.location?.display_name || location,
-      salary: job.salary_is_predicted === '1'
-        ? `~£${Math.round(job.salary_min || 0).toLocaleString()}-£${Math.round(job.salary_max || 0).toLocaleString()}`
-        : job.salary_min
-          ? `£${Math.round(job.salary_min).toLocaleString()}-£${Math.round(job.salary_max || job.salary_min).toLocaleString()}`
-          : 'Not specified',
-      description: job.description || '',
-      source: 'adzuna' as const,
-      source_url: job.redirect_url || '',
-      posted_date: job.created || new Date().toISOString(),
-    }));
+    const results: JobListing[] = (data.results || []).map((job: any) => {
+      const jd = job.description || '';
+      return {
+        id: `adzuna-${job.id}`,
+        title: job.title || '',
+        company: job.company?.display_name || 'Unknown Company',
+        location: job.location?.display_name || location,
+        salary: job.salary_is_predicted === '1'
+          ? `~£${Math.round(job.salary_min || 0).toLocaleString()}-£${Math.round(job.salary_max || 0).toLocaleString()}`
+          : job.salary_min
+            ? `£${Math.round(job.salary_min).toLocaleString()}-£${Math.round(job.salary_max || job.salary_min).toLocaleString()}`
+            : 'Not specified',
+        description: jd,
+        source: 'adzuna' as const,
+        source_url: job.redirect_url || '',
+        posted_date: job.created || new Date().toISOString(),
+        is_sponsorship: detectSponsorship(jd + (job.title || '')),
+      };
+    });
 
     return results;
   } catch (err) {
     console.error('[search-jobs] Adzuna fetch error:', err);
     return [];
   }
+}
+
+// ── Sponsorship Detection ──
+function detectSponsorship(description: string): boolean {
+  const text = description.toLowerCase();
+  const keywords = [
+    'sponsorship', 'tier 2', 'visa', 'ukvi', 
+    'eligible to work', 'right to work', 'sponsor available',
+    'sponsorship available', 'visa sponsorship', 'skilled worker visa',
+    'points-based system', 'certificate of sponsorship', 'cos'
+  ];
+  return keywords.some(k => text.includes(k));
 }
 
 // ── LinkedIn Guest API Search ──
@@ -99,9 +115,7 @@ async function searchLinkedIn(role: string, location: string): Promise<JobListin
 
     const html = await res.text();
 
-    // Parse the HTML response - LinkedIn returns <li> cards
     const jobs: JobListing[] = [];
-    const cardRegex = /<div class="base-card[^"]*"[^>]*>[\s\S]*?<\/div>\s*<\/div>\s*<\/div>/gi;
     const titleRegex = /<span class="sr-only">([\s\S]*?)<\/span>/;
     const companyRegex = /<h4[^>]*class="[^"]*base-search-card__subtitle[^"]*"[^>]*>\s*<a[^>]*>([\s\S]*?)<\/a>/;
     const companyFallback = /<h4[^>]*class="[^"]*base-search-card__subtitle[^"]*"[^>]*>([\s\S]*?)<\/h4>/;
@@ -109,7 +123,6 @@ async function searchLinkedIn(role: string, location: string): Promise<JobListin
     const linkRegex = /<a[^>]*class="[^"]*base-card__full-link[^"]*"[^>]*href="([^"]*?)"/;
     const dateRegex = /<time[^>]*datetime="([^"]*?)"/;
 
-    // Simpler approach: extract individual job listing blocks
     const listItems = html.split('<li>').slice(1);
 
     for (const item of listItems) {
@@ -134,28 +147,30 @@ async function searchLinkedIn(role: string, location: string): Promise<JobListin
           ? dateMatch[1]
           : new Date().toISOString();
 
+        const description = `${title} at ${company} - ${jobLocation}. Apply on LinkedIn for full details.`;
+        
         jobs.push({
           id: `linkedin-${Buffer.from(title + company).toString('base64').slice(0, 20)}`,
           title,
           company,
           location: jobLocation,
           salary: 'Not specified',
-          description: `${title} at ${company} - ${jobLocation}. Apply on LinkedIn for full details.`,
+          description,
           source: 'linkedin',
           source_url: jobUrl,
           posted_date: postedDate,
-        });
+          is_sponsorship: detectSponsorship(description + title),
+        } as any);
       }
     }
 
-    // Filter out jobs older than 20 days
     const twentyDaysAgo = Date.now() - 20 * 24 * 60 * 60 * 1000;
     const filtered = jobs.filter(job => {
       const posted = new Date(job.posted_date).getTime();
-      return !isNaN(posted) ? posted >= twentyDaysAgo : true; // Keep if date unparseable
+      return !isNaN(posted) ? posted >= twentyDaysAgo : true;
     });
 
-    return filtered.slice(0, 20); // Cap at 20
+    return filtered.slice(0, 20);
   } catch (err) {
     console.error('[search-jobs] LinkedIn fetch error:', err);
     return [];
@@ -198,7 +213,7 @@ export async function POST(request: Request) {
     const admin = createAdminClient();
     const { data: profile, error: profileError } = await admin
       .from('users')
-      .select('target_roles, target_locations, salary_min, salary_max, excluded_companies')
+      .select('target_roles, target_locations, salary_min, salary_max, excluded_companies, cv_parsed_json')
       .eq('id', user.id)
       .single();
 
@@ -219,19 +234,22 @@ export async function POST(request: Request) {
       );
     }
 
-    const { target_roles, target_locations, salary_min, salary_max, excluded_companies } = profile;
+    const { target_roles, target_locations, salary_min, salary_max, excluded_companies, cv_parsed_json } = profile;
 
-    console.log('[search-jobs] User preferences:', {
-      target_roles,
-      target_locations,
-      salary_min,
-      salary_max,
-      excluded_companies
-    });
+    // Enhance search roles if CV is available but preferences are thin
+    let searchRoles = [...(target_roles || [])];
+    if (searchRoles.length === 0 && cv_parsed_json?.primary_domain) {
+      searchRoles.push(cv_parsed_json.primary_domain);
+    }
+    if (searchRoles.length === 0 && cv_parsed_json?.structured_experience?.length > 0) {
+      searchRoles.push(cv_parsed_json.structured_experience[0].title);
+    }
 
-    if (!target_roles?.length || !target_locations?.length) {
+    console.log('[search-jobs] Final search roles:', searchRoles);
+
+    if (!searchRoles.length || !target_locations?.length) {
       return NextResponse.json(
-        { error: `Please set target roles and locations in Preferences before searching. Current: roles=${JSON.stringify(target_roles)}, locations=${JSON.stringify(target_locations)}` },
+        { error: 'Please set target roles and locations in Preferences before searching.' },
         { status: 400 }
       );
     }
@@ -240,7 +258,7 @@ export async function POST(request: Request) {
     const allJobs: JobListing[] = [];
     const searchPromises: Promise<JobListing[]>[] = [];
 
-    for (const role of target_roles) {
+    for (const role of searchRoles) {
       for (const location of target_locations) {
         searchPromises.push(searchAdzuna(role, location, salary_min, salary_max));
         searchPromises.push(searchLinkedIn(role, location));
@@ -257,14 +275,29 @@ export async function POST(request: Request) {
     jobs = filterExcluded(jobs, excluded_companies || []);
     jobs.sort((a, b) => new Date(b.posted_date).getTime() - new Date(a.posted_date).getTime());
 
-    // Save to job_listings table
-    if (jobs.length > 0) {
-      const rows = jobs.map(job => ({
+    // Group jobs by date
+    const now = new Date();
+    const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+    const grouped = {
+      today: jobs.filter(j => new Date(j.posted_date) >= oneDayAgo),
+      week: jobs.filter(j => {
+        const d = new Date(j.posted_date);
+        return d < oneDayAgo && d >= oneWeekAgo;
+      }),
+      older: jobs.filter(j => new Date(j.posted_date) < oneWeekAgo)
+    };
+
+    // Save to job_listings table (limit to top 50 to avoid massive upserts)
+    const jobsToSave = jobs.slice(0, 50);
+    if (jobsToSave.length > 0) {
+      const rows = jobsToSave.map(job => ({
         title: job.title,
         company: job.company,
         location: job.location,
         salary: job.salary,
-        description: job.description.slice(0, 5000), // Truncate long descriptions
+        description: job.description.slice(0, 5000),
         source_url: job.source_url,
         source: job.source,
         posted_date: job.posted_date,
@@ -274,22 +307,19 @@ export async function POST(request: Request) {
         .from('job_listings')
         .upsert(rows, { onConflict: 'source_url', ignoreDuplicates: true });
 
-      if (insertError) {
-        console.error('[search-jobs] DB insert error:', insertError);
-        // Non-fatal — still return the jobs
-      }
+      if (insertError) console.error('[search-jobs] DB insert error:', insertError);
     }
 
     return NextResponse.json({
       total_found: jobs.length,
+      grouped_jobs: grouped,
       search_criteria: {
-        roles: target_roles,
+        roles: searchRoles,
         locations: target_locations,
         salary_range: salary_min || salary_max
           ? `£${(salary_min || 0).toLocaleString()} - £${(salary_max || 0).toLocaleString()}`
           : 'Any',
       },
-      jobs,
     });
   } catch (error: any) {
     console.error('[search-jobs] Error:', error);

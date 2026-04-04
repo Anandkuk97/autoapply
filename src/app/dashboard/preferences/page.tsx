@@ -42,7 +42,6 @@ export default function PreferencesPage() {
 
   // Saved profiles
   const [profiles, setProfiles] = useState<PreferenceProfile[]>([]);
-  const [loadingProfiles, setLoadingProfiles] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
   const [renamingProfile, setRenamingProfile] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
@@ -61,7 +60,6 @@ export default function PreferencesPage() {
       if (!authUser) return;
       setUser(authUser);
 
-      // Load current preferences via server API (bypasses RLS) + profiles in parallel
       const [profileRes, profilesResult] = await Promise.all([
         fetch("/api/get-profile").then(r => r.json()),
         supabase
@@ -71,9 +69,6 @@ export default function PreferencesPage() {
           .order("created_at", { ascending: false })
       ]);
 
-      console.log("[preferences] Profile API result:", profileRes);
-
-      // Load current preferences from API response
       if (profileRes.profile) {
         const data = profileRes.profile;
         setTargetRoles(data.target_roles || []);
@@ -84,16 +79,11 @@ export default function PreferencesPage() {
         setExcludedCompanies(data.excluded_companies || []);
       }
 
-      // Load saved profiles
       if (!profilesResult.error && profilesResult.data) {
         setProfiles(profilesResult.data);
       }
 
-      // Build recent suggestions from saved profiles + current prefs
-      buildRecentSuggestions(
-        profileRes.profile,
-        profilesResult.data || []
-      );
+      buildRecentSuggestions(profileRes.profile, profilesResult.data || []);
     } catch (err: any) {
       console.error("Error loading preferences:", err);
     } finally {
@@ -105,15 +95,9 @@ export default function PreferencesPage() {
     const rolesSet = new Set<string>();
     const locsSet = new Set<string>();
 
-    // From current preferences
-    if (currentPrefs?.target_roles) {
-      currentPrefs.target_roles.forEach((r: string) => rolesSet.add(r));
-    }
-    if (currentPrefs?.target_locations) {
-      currentPrefs.target_locations.forEach((l: string) => locsSet.add(l));
-    }
+    if (currentPrefs?.target_roles) currentPrefs.target_roles.forEach((r: string) => rolesSet.add(r));
+    if (currentPrefs?.target_locations) currentPrefs.target_locations.forEach((l: string) => locsSet.add(l));
 
-    // From all saved profiles
     for (const p of savedProfiles) {
       if (p.target_roles) p.target_roles.forEach(r => rolesSet.add(r));
       if (p.target_locations) p.target_locations.forEach(l => locsSet.add(l));
@@ -129,48 +113,20 @@ export default function PreferencesPage() {
     );
   };
 
-  // Keep refs in sync so handleSave always reads latest values
-  const rolesRef = useRef(targetRoles);
-  const locsRef = useRef(targetLocations);
-  useEffect(() => { rolesRef.current = targetRoles; }, [targetRoles]);
-  useEffect(() => { locsRef.current = targetLocations; }, [targetLocations]);
-
-  // Log every state change for debugging
-  useEffect(() => {
-    console.log("[preferences] State changed -> targetRoles:", targetRoles);
-  }, [targetRoles]);
-  useEffect(() => {
-    console.log("[preferences] State changed -> targetLocations:", targetLocations);
-  }, [targetLocations]);
-
-  // ── Save current preferences via server API (bypasses RLS) ──
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
     setError("");
 
     try {
-      // Read from both state and ref to diagnose any stale closure issue
-      console.log("[preferences] handleSave called");
-      console.log("[preferences] targetRoles (state):", targetRoles);
-      console.log("[preferences] targetRoles (ref):", rolesRef.current);
-      console.log("[preferences] targetLocations (state):", targetLocations);
-      console.log("[preferences] targetLocations (ref):", locsRef.current);
-
-      // Use ref values as they are guaranteed fresh
-      const roles = rolesRef.current;
-      const locs = locsRef.current;
-
       const payload = {
-        target_roles: roles,
-        target_locations: locs,
+        target_roles: targetRoles,
+        target_locations: targetLocations,
         salary_min: salaryMin ? parseInt(salaryMin) : null,
         salary_max: salaryMax ? parseInt(salaryMax) : null,
         work_type: workTypes.join(", "),
         excluded_companies: excludedCompanies
       };
-
-      console.log("[preferences] Saving via API:", JSON.stringify(payload, null, 2));
 
       const res = await fetch("/api/save-preferences", {
         method: "POST",
@@ -179,17 +135,7 @@ export default function PreferencesPage() {
       });
 
       const result = await res.json();
-      console.log("[preferences] API response:", result);
-
-      if (!res.ok) {
-        throw new Error(result.error || "Failed to save preferences");
-      }
-
-      // Update recent suggestions
-      buildRecentSuggestions(
-        { target_roles: roles, target_locations: locs },
-        profiles
-      );
+      if (!res.ok) throw new Error(result.error || "Failed to save preferences");
 
       setSuccess(true);
     } catch (err: any) {
@@ -199,7 +145,6 @@ export default function PreferencesPage() {
     }
   };
 
-  // ── Save as Profile ──
   const handleSaveAsProfile = async () => {
     if (!user) return;
     setSavingProfile(true);
@@ -224,10 +169,6 @@ export default function PreferencesPage() {
       if (insertError) throw insertError;
       if (data) {
         setProfiles(prev => [data, ...prev]);
-        buildRecentSuggestions(
-          { target_roles: targetRoles, target_locations: targetLocations },
-          [data, ...profiles]
-        );
       }
     } catch (err: any) {
       setError(err.message || "Failed to save profile");
@@ -236,7 +177,6 @@ export default function PreferencesPage() {
     }
   };
 
-  // ── Load Profile ──
   const handleLoadProfile = (profile: PreferenceProfile) => {
     setTargetRoles(profile.target_roles || []);
     setTargetLocations(profile.target_locations || []);
@@ -244,182 +184,93 @@ export default function PreferencesPage() {
     setSalaryMax(profile.salary_max ? profile.salary_max.toString() : "");
     setWorkTypes(profile.work_type ? profile.work_type.split(", ").filter(Boolean) : []);
     setExcludedCompanies(profile.excluded_companies || []);
-    setSuccess(false); // Reset success state since form changed
+    setSuccess(false);
   };
 
-  // ── Rename Profile ──
   const handleRenameProfile = async (profileId: string) => {
     if (!renameValue.trim()) return;
-
-    const { error: renameError } = await supabase
-      .from("preference_profiles")
-      .update({ name: renameValue.trim() })
-      .eq("id", profileId);
-
-    if (!renameError) {
-      setProfiles(prev =>
-        prev.map(p => p.id === profileId ? { ...p, name: renameValue.trim() } : p)
-      );
+    const { error } = await supabase.from("preference_profiles").update({ name: renameValue.trim() }).eq("id", profileId);
+    if (!error) {
+      setProfiles(prev => prev.map(p => p.id === profileId ? { ...p, name: renameValue.trim() } : p));
     }
     setRenamingProfile(null);
-    setRenameValue("");
   };
 
-  // ── Delete Profile ──
   const handleDeleteProfile = async (profileId: string) => {
-    const { error: deleteError } = await supabase
-      .from("preference_profiles")
-      .delete()
-      .eq("id", profileId);
-
-    if (!deleteError) {
-      setProfiles(prev => prev.filter(p => p.id !== profileId));
-    }
+    const { error } = await supabase.from("preference_profiles").delete().eq("id", profileId);
+    if (!error) setProfiles(prev => prev.filter(p => p.id !== profileId));
   };
 
-  // ── Add suggestion tag (use functional update for safety) ──
   const addRoleSuggestion = (role: string) => {
-    setTargetRoles(prev => {
-      if (prev.includes(role)) return prev;
-      console.log("[preferences] Added role suggestion:", role);
-      return [...prev, role];
-    });
+    setTargetRoles(prev => prev.includes(role) ? prev : [...prev, role]);
   };
 
-  const addLocationSuggestion = (loc: string) => {
-    setTargetLocations(prev => {
-      if (prev.includes(loc)) return prev;
-      console.log("[preferences] Added location suggestion:", loc);
-      return [...prev, loc];
-    });
-  };
+  if (loading) return (
+    <div className="flex justify-center items-center h-64">
+      <Loader2 className="w-8 h-8 text-[var(--color-primary)] animate-spin" />
+    </div>
+  );
 
-  if (loading) {
-    return (
-      <div className="flex justify-center items-center h-64">
-        <Loader2 className="w-8 h-8 text-[var(--color-primary)] animate-spin" />
+  if (success) return (
+    <motion.div
+      initial={{ opacity: 0, scale: 0.95 }}
+      animate={{ opacity: 1, scale: 1 }}
+      className="max-w-2xl mx-auto mt-12 bg-white border border-emerald-100 rounded-[2.5rem] p-12 text-center shadow-xl"
+    >
+      <div className="w-20 h-20 bg-emerald-500 rounded-full flex items-center justify-center mx-auto mb-6 shadow-lg shadow-emerald-200">
+        <CheckCircle2 className="w-10 h-10 text-white" />
       </div>
-    );
-  }
+      <h2 className="text-3xl font-black text-slate-900 mb-4 tracking-tighter">Preferences Saved!</h2>
+      <p className="text-slate-600 font-medium mb-8 leading-relaxed">Your job search criteria have been successfully updated. Our neural engine will now prioritize matches reflecting your targets.</p>
+      <div className="flex gap-4 justify-center">
+        <button onClick={() => setSuccess(false)} className="px-6 py-3 bg-slate-100 text-slate-900 font-black text-[10px] uppercase tracking-widest rounded-xl hover:bg-slate-200 transition">Edit Again</button>
+        <button onClick={() => router.push("/dashboard")} className="px-10 py-3 bg-[var(--color-primary)] text-white font-black text-[10px] uppercase tracking-widest rounded-xl inline-flex items-center justify-center gap-2 hover:bg-emerald-700 transition hover:scale-105 shadow-xl shadow-emerald-200">Go to Dashboard <ArrowRight className="w-5 h-5" /></button>
+      </div>
+    </motion.div>
+  );
 
-  if (success) {
-    return (
-      <motion.div
-        initial={{ opacity: 0, scale: 0.95 }}
-        animate={{ opacity: 1, scale: 1 }}
-        className="max-w-2xl mx-auto mt-12 bg-white/5 border border-white/10 rounded-3xl p-12 text-center"
-      >
-        <div className="w-20 h-20 bg-green-500/20 rounded-full flex items-center justify-center mx-auto mb-6">
-          <CheckCircle2 className="w-10 h-10 text-green-400" />
-        </div>
-        <h2 className="text-3xl font-heading font-bold text-white mb-4">Preferences Saved!</h2>
-        <p className="text-gray-400 mb-8">
-          Your job search criteria have been successfully updated. Our AI will use these targets to find your perfect matches.
-        </p>
-        <div className="flex gap-4 justify-center">
-          <button
-            onClick={() => setSuccess(false)}
-            className="px-6 py-3 bg-white/10 text-white font-medium rounded-xl flex items-center gap-2 hover:bg-white/20 transition"
-          >
-            Edit Again
-          </button>
-          <button
-            onClick={() => router.push("/dashboard")}
-            className="px-8 py-3 bg-[var(--color-primary)] text-black font-bold rounded-xl inline-flex items-center justify-center gap-2 hover:bg-yellow-400 transition hover:scale-105"
-          >
-            Go to Dashboard <ArrowRight className="w-5 h-5" />
-          </button>
-        </div>
-      </motion.div>
-    );
-  }
-
-  // Filter suggestions to only show values NOT already in the current list
   const availableRoleSuggestions = recentRoles.filter(r => !targetRoles.includes(r));
-  const availableLocationSuggestions = recentLocations.filter(l => !targetLocations.includes(l));
 
   return (
-    <div className="max-w-3xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-1000">
-      <div>
-        <h1 className="text-3xl font-heading font-bold text-white mb-2">Job Preferences</h1>
-        <p className="text-gray-400">Set your targets so our AI can find the perfect matches for you.</p>
-      </div>
+    <div className="max-w-3xl mx-auto space-y-12 animate-in fade-in slide-in-from-bottom-4 duration-1000 pb-20">
+      <header className="space-y-2">
+        <h2 className="text-[4rem] font-black leading-[1] tracking-tighter text-slate-900">Targets.</h2>
+        <p className="text-slate-500 text-[12px] tracking-[0.3em] uppercase font-black opacity-60">Neural Matching Calibration</p>
+      </header>
 
       {error && (
-        <div className="bg-red-500/10 border border-red-500/50 text-red-400 px-4 py-3 rounded-xl text-sm flex items-center gap-2">
-          <X className="w-4 h-4 cursor-pointer hover:text-red-300" onClick={() => setError("")} />
+        <div className="bg-red-50 border border-red-100 text-red-600 px-6 py-4 rounded-2xl text-sm font-black flex items-center gap-3">
+          <X className="w-5 h-5 cursor-pointer" onClick={() => setError("")} />
           {error}
         </div>
       )}
 
-      {/* ═══════════════════════════════════════════ */}
-      {/* SAVED PROFILES                              */}
-      {/* ═══════════════════════════════════════════ */}
       {profiles.length > 0 && (
-        <div className="bg-white/5 border border-white/10 p-6 rounded-3xl space-y-4">
-          <h3 className="text-lg font-heading font-bold text-white flex items-center gap-2">
+        <div className="bg-white border border-slate-200 p-8 rounded-[2.5rem] space-y-6 shadow-sm">
+          <h3 className="text-lg font-black text-slate-900 flex items-center gap-3 uppercase tracking-widest">
             <FolderOpen className="w-5 h-5 text-[var(--color-primary)]" />
-            Saved Profiles
+            Registry Profiles
           </h3>
-          <div className="space-y-2">
+          <div className="space-y-3">
             {profiles.map(profile => (
-              <div
-                key={profile.id}
-                className="flex items-center justify-between bg-black/30 border border-white/5 rounded-xl px-4 py-3 group hover:border-white/15 transition"
-              >
+              <div key={profile.id} className="flex items-center justify-between bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 group hover:border-[var(--color-primary)] transition-all">
                 <div className="flex-1 min-w-0">
                   {renamingProfile === profile.id ? (
                     <div className="flex items-center gap-2">
-                      <input
-                        type="text"
-                        value={renameValue}
-                        onChange={e => setRenameValue(e.target.value)}
-                        onKeyDown={e => e.key === "Enter" && handleRenameProfile(profile.id)}
-                        autoFocus
-                        className="bg-black/50 border border-white/20 rounded-lg px-3 py-1 text-white text-sm outline-none focus:border-[var(--color-primary)]"
-                      />
-                      <button
-                        onClick={() => handleRenameProfile(profile.id)}
-                        className="text-[#81C784] text-xs font-bold hover:underline"
-                      >Save</button>
-                      <button
-                        onClick={() => { setRenamingProfile(null); setRenameValue(""); }}
-                        className="text-gray-500 text-xs hover:underline"
-                      >Cancel</button>
+                      <input type="text" value={renameValue} onChange={e => setRenameValue(e.target.value)} onKeyDown={e => e.key === "Enter" && handleRenameProfile(profile.id)} autoFocus className="bg-white border border-slate-200 rounded-lg px-4 py-2 text-slate-900 text-sm outline-none focus:border-[var(--color-primary)]" />
+                      <button onClick={() => handleRenameProfile(profile.id)} className="text-emerald-600 text-xs font-black uppercase tracking-widest hover:underline">Save</button>
                     </div>
                   ) : (
                     <div>
-                      <span className="text-white font-semibold text-sm">{profile.name}</span>
-                      <span className="text-gray-500 text-xs ml-3">
-                        {profile.target_roles?.join(", ").slice(0, 50) || "No roles"}
-                        {" · "}
-                        {profile.target_locations?.join(", ").slice(0, 40) || "No locations"}
-                      </span>
+                      <span className="text-slate-900 font-black text-sm uppercase tracking-tight">{profile.name}</span>
+                      <p className="text-slate-500 text-[10px] font-bold uppercase tracking-widest mt-0.5 truncate">{profile.target_roles?.join(" • ") || "Global Target"}</p>
                     </div>
                   )}
                 </div>
-                <div className="flex items-center gap-1 shrink-0 ml-3">
-                  <button
-                    onClick={() => handleLoadProfile(profile)}
-                    className="px-3 py-1.5 bg-[var(--color-primary)]/10 text-[var(--color-primary)] rounded-lg text-xs font-bold hover:bg-[var(--color-primary)]/20 transition"
-                    title="Load this profile"
-                  >
-                    Load
-                  </button>
-                  <button
-                    onClick={() => { setRenamingProfile(profile.id); setRenameValue(profile.name); }}
-                    className="p-1.5 hover:bg-white/10 rounded-lg transition text-gray-400 hover:text-white"
-                    title="Rename"
-                  >
-                    <Pencil className="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    onClick={() => handleDeleteProfile(profile.id)}
-                    className="p-1.5 hover:bg-red-500/20 rounded-lg transition text-gray-400 hover:text-red-400"
-                    title="Delete"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
+                <div className="flex items-center gap-3 shrink-0 ml-4">
+                  <button onClick={() => handleLoadProfile(profile)} className="px-4 py-2 bg-slate-900 text-white rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-black transition-all">Activate</button>
+                  <button onClick={() => { setRenamingProfile(profile.id); setRenameValue(profile.name); }} className="p-2 hover:bg-white rounded-lg transition text-slate-400 hover:text-slate-900 shadow-sm border border-transparent hover:border-slate-100"><Pencil className="w-3.5 h-3.5" /></button>
+                  <button onClick={() => handleDeleteProfile(profile.id)} className="p-2 hover:bg-red-50 rounded-lg transition text-slate-400 hover:text-red-500"><Trash2 className="w-3.5 h-3.5" /></button>
                 </div>
               </div>
             ))}
@@ -427,160 +278,83 @@ export default function PreferencesPage() {
         </div>
       )}
 
-      {/* ═══════════════════════════════════════════ */}
-      {/* PREFERENCES FORM                            */}
-      {/* ═══════════════════════════════════════════ */}
-      <form onSubmit={handleSave} className="bg-white/5 border border-white/10 p-8 rounded-3xl space-y-8">
-        {/* Target Roles */}
+      <form onSubmit={handleSave} className="bg-white border border-slate-200 p-10 rounded-[2.5rem] space-y-10 shadow-sm">
         <div>
-          <label className="block text-sm font-medium text-gray-300 mb-2 flex items-center gap-2">
+          <label className="block text-sm font-black text-slate-800 mb-2 flex items-center gap-2 uppercase tracking-widest">
             <Briefcase className="w-4 h-4 text-[var(--color-primary)]" />
             Target Job Titles
           </label>
-          <p className="text-xs text-gray-500 mb-3">Type a title and press Enter (e.g. "Software Engineer")</p>
-          <TagInput
-            tags={targetRoles}
-            setTags={setTargetRoles}
-            placeholder="Add job title..."
-          />
-          {/* Recent suggestions */}
+          <p className="text-[10px] text-slate-400 uppercase font-bold mb-4 tracking-wider">Type a title and press Enter (e.g. "Operations Manager")</p>
+          <div className="bg-slate-50 border border-slate-200 rounded-2xl p-2">
+            <TagInput tags={targetRoles} setTags={setTargetRoles} placeholder="Add job title..." />
+          </div>
           {availableRoleSuggestions.length > 0 && (
-            <div className="mt-2 flex flex-wrap gap-1.5 items-center">
-              <Clock className="w-3 h-3 text-gray-500" />
-              <span className="text-[10px] text-gray-500 mr-1">Recent:</span>
+            <div className="mt-4 flex flex-wrap gap-2 items-center">
+              <span className="text-[9px] text-slate-400 font-black uppercase tracking-widest mr-2">Suggestions:</span>
               {availableRoleSuggestions.map(role => (
-                <button
-                  key={role}
-                  type="button"
-                  onClick={() => addRoleSuggestion(role)}
-                  className="px-2.5 py-0.5 bg-white/5 border border-white/10 rounded-full text-[11px] text-gray-400 hover:text-white hover:border-[var(--color-primary)] hover:bg-[var(--color-primary)]/10 transition cursor-pointer"
-                >
-                  + {role}
-                </button>
+                <button key={role} type="button" onClick={() => addRoleSuggestion(role)} className="px-3 py-1 bg-white border border-slate-200 rounded-full text-[10px] font-black uppercase text-slate-600 hover:text-[var(--color-primary)] hover:border-[var(--color-primary)] transition-all shadow-sm">+ {role}</button>
               ))}
             </div>
           )}
         </div>
 
-        {/* Target Locations */}
         <div>
-          <label className="block text-sm font-medium text-gray-300 mb-2 flex items-center gap-2">
+          <label className="block text-sm font-black text-slate-800 mb-2 flex items-center gap-2 uppercase tracking-widest">
             <MapPin className="w-4 h-4 text-[var(--color-primary)]" />
             Target Locations
           </label>
-          <p className="text-xs text-gray-500 mb-3">Type a location and press Enter (e.g. "London", "Remote UK")</p>
-          <TagInput
-            tags={targetLocations}
-            setTags={setTargetLocations}
-            placeholder="Add location..."
-          />
-          {/* Recent suggestions */}
-          {availableLocationSuggestions.length > 0 && (
-            <div className="mt-2 flex flex-wrap gap-1.5 items-center">
-              <Clock className="w-3 h-3 text-gray-500" />
-              <span className="text-[10px] text-gray-500 mr-1">Recent:</span>
-              {availableLocationSuggestions.map(loc => (
-                <button
-                  key={loc}
-                  type="button"
-                  onClick={() => addLocationSuggestion(loc)}
-                  className="px-2.5 py-0.5 bg-white/5 border border-white/10 rounded-full text-[11px] text-gray-400 hover:text-white hover:border-[var(--color-primary)] hover:bg-[var(--color-primary)]/10 transition cursor-pointer"
-                >
-                  + {loc}
-                </button>
-              ))}
-            </div>
-          )}
+          <div className="bg-slate-50 border border-slate-200 rounded-2xl p-2">
+            <TagInput tags={targetLocations} setTags={setTargetLocations} placeholder="Add location..." />
+          </div>
         </div>
 
-        {/* Salary Range */}
-        <div>
-          <label className="block text-sm font-medium text-gray-300 mb-3 flex items-center gap-2">
-            <PoundSterling className="w-4 h-4 text-[var(--color-primary)]" />
-            Salary Expectation (GBP)
-          </label>
-          <div className="flex items-center gap-4">
-            <div className="relative flex-1">
-              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500">£</span>
-              <input
-                type="number"
-                value={salaryMin}
-                onChange={e => setSalaryMin(e.target.value)}
-                placeholder="Min Salary"
-                className="w-full bg-black/50 border border-white/10 rounded-xl pl-8 pr-4 py-3 text-white focus:border-[var(--color-primary)] outline-none"
-              />
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-8">
+          <div>
+            <label className="block text-sm font-black text-slate-800 mb-4 flex items-center gap-2 uppercase tracking-widest">
+              <PoundSterling className="w-4 h-4 text-[var(--color-primary)]" />
+              Minimum Salary
+            </label>
+            <div className="relative">
+              <span className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-400 font-black">£</span>
+              <input type="number" value={salaryMin} onChange={e => setSalaryMin(e.target.value)} placeholder="0" className="w-full bg-slate-50 border border-slate-200 rounded-2xl pl-12 pr-6 py-4 text-slate-900 font-black focus:border-[var(--color-primary)] outline-none transition-all" />
             </div>
-            <span className="text-gray-500">to</span>
-            <div className="relative flex-1">
-              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500">£</span>
-              <input
-                type="number"
-                value={salaryMax}
-                onChange={e => setSalaryMax(e.target.value)}
-                placeholder="Max Salary"
-                className="w-full bg-black/50 border border-white/10 rounded-xl pl-8 pr-4 py-3 text-white focus:border-[var(--color-primary)] outline-none"
-              />
+          </div>
+          <div>
+            <label className="block text-sm font-black text-slate-800 mb-4 flex items-center gap-2 uppercase tracking-widest">
+              <PoundSterling className="w-4 h-4 text-[var(--color-primary)]" />
+              Maximum Salary
+            </label>
+            <div className="relative">
+              <span className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-400 font-black">£</span>
+              <input type="number" value={salaryMax} onChange={e => setSalaryMax(e.target.value)} placeholder="150,000" className="w-full bg-slate-50 border border-slate-200 rounded-2xl pl-12 pr-6 py-4 text-slate-900 font-black focus:border-[var(--color-primary)] outline-none transition-all" />
             </div>
           </div>
         </div>
 
-        {/* Work Type */}
-        <div>
-          <label className="block text-sm font-medium text-gray-300 mb-3">
-            Work Environment
-          </label>
+        <div className="space-y-4">
+          <label className="block text-sm font-black text-slate-800 uppercase tracking-widest">Work Environment</label>
           <div className="flex flex-wrap gap-4">
             {["Remote", "Hybrid", "On-site"].map((type) => (
               <label key={type} className="flex items-center gap-3 cursor-pointer group">
-                <div className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${
-                  workTypes.includes(type) ? "bg-[var(--color-primary)] border-[var(--color-primary)]" : "border-gray-500 group-hover:border-[var(--color-primary)]"
+                <div className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-all ${
+                  workTypes.includes(type) ? "bg-[var(--color-primary)] border-transparent shadow-lg shadow-emerald-200" : "border-slate-200 bg-white"
                 }`}>
-                  {workTypes.includes(type) && <CheckCircle2 className="w-3 h-3 text-black" />}
+                  {workTypes.includes(type) && <CheckCircle2 className="w-4 h-4 text-white" />}
                 </div>
-                <span className="text-gray-300 group-hover:text-white transition">{type}</span>
-                <input
-                  type="checkbox"
-                  className="hidden"
-                  checked={workTypes.includes(type)}
-                  onChange={() => handleWorkTypeToggle(type)}
-                />
+                <span className="text-slate-700 font-bold group-hover:text-slate-900 transition">{type}</span>
+                <input type="checkbox" className="hidden" checked={workTypes.includes(type)} onChange={() => handleWorkTypeToggle(type)} />
               </label>
             ))}
           </div>
         </div>
 
-        {/* Excluded Companies */}
-        <div>
-          <label className="block text-sm font-medium text-gray-300 mb-2 flex items-center gap-2">
-            <Building className="w-4 h-4 text-[var(--color-primary)]" />
-            Excluded Companies
-          </label>
-          <p className="text-xs text-gray-500 mb-3">Skip roles from these companies</p>
-          <TagInput
-            tags={excludedCompanies}
-            setTags={setExcludedCompanies}
-            placeholder="Add company to block..."
-          />
-        </div>
-
-        {/* Action buttons */}
-        <div className="pt-6 border-t border-white/10 flex flex-wrap gap-3 justify-between items-center">
-          <button
-            type="button"
-            onClick={handleSaveAsProfile}
-            disabled={savingProfile || (!targetRoles.length && !targetLocations.length)}
-            className="px-5 py-2.5 bg-white/10 border border-white/20 text-white font-medium rounded-xl flex items-center gap-2 hover:bg-white/20 transition text-sm disabled:opacity-40 disabled:cursor-not-allowed"
-          >
+        <div className="pt-10 border-t border-slate-100 flex flex-wrap gap-4 justify-between items-center">
+          <button type="button" onClick={handleSaveAsProfile} disabled={savingProfile || (!targetRoles.length && !targetLocations.length)} className="h-16 px-8 bg-white border border-slate-200 text-slate-900 font-black text-[10px] uppercase tracking-widest rounded-2xl flex items-center gap-3 hover:bg-slate-50 transition shadow-sm disabled:opacity-40">
             {savingProfile ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
-            Save as Profile
+            Save current config to Registry
           </button>
-
-          <button
-            type="submit"
-            disabled={saving}
-            className="px-8 py-3 bg-[var(--color-primary)] text-black font-bold rounded-xl flex items-center justify-center gap-2 hover:bg-yellow-400 transition hover:scale-[1.02] active:scale-95"
-          >
-            {saving ? <Loader2 className="w-5 h-5 animate-spin" /> : <><Save className="w-4 h-4" /> Save Preferences</>}
+          <button type="submit" disabled={saving} className="h-16 px-12 bg-slate-900 text-white font-black text-[11px] uppercase tracking-[0.2em] rounded-2xl flex items-center justify-center gap-3 hover:bg-black transition hover:scale-[1.02] active:scale-95 shadow-xl shadow-slate-200">
+            {saving ? <Loader2 className="w-5 h-5 animate-spin" /> : <><Save className="w-5 h-5" /> Update Core Targets</>}
           </button>
         </div>
       </form>

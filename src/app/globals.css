@@ -50,58 +50,64 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 /* Obsidian Glass Scoped Theme */
+/* Obsidian Glass Scoped Theme - Premium Dark Mode */
 .obsidian-glass {
-  --color-surface-container: #e7eefe;
-  --color-on-primary-container: #003819;
-  --color-on-tertiary-container: #3e008d;
-  --color-on-secondary-fixed: #141b2b;
-  --color-outline-variant: #bccabb;
-  --color-on-background: #151c27;
-  --color-tertiary-fixed: #eaddff;
+  --color-surface-container: #111113;
+  --color-on-primary-container: #59df87;
+  --color-on-tertiary-container: #d2bbff;
+  --color-on-secondary-fixed: #e2e8f0;
+  --color-outline-variant: rgba(255, 255, 255, 0.08);
+  --color-on-background: #F0F4FF;
+  --color-tertiary-fixed: #25005a;
   --color-on-tertiary: #ffffff;
   --color-on-secondary: #ffffff;
-  --color-inverse-primary: #59df87;
-  --color-surface-dim: #d3daea;
-  --color-on-primary: #ffffff;
-  --color-error: #ba1a1a;
-  --color-on-surface: #151c27;
-  --color-on-error: #ffffff;
-  --color-inverse-surface: #2a313d;
-  --color-secondary-fixed-dim: #c0c6db;
-  --color-tertiary-fixed-dim: #d2bbff;
-  --color-surface-container-lowest: #ffffff;
-  --color-surface-tint: #006d36;
-  --color-primary-container: #15ae5c;
-  --color-primary: #006d36;
-  --color-error-container: #ffdad6;
-  --color-tertiary: #732ee4;
-  --color-on-secondary-fixed-variant: #404758;
-  --color-on-primary-fixed: #00210c;
-  --color-on-error-container: #93000a;
-  --color-primary-fixed: #77fca0;
-  --color-secondary-fixed: #dce2f7;
-  --color-on-surface-variant: #3d4a3e;
-  --color-secondary: #575e70;
-  --color-surface-variant: #dce2f3;
+  --color-inverse-primary: #006d36;
+  --color-surface-dim: #1a1a1f;
+  --color-on-primary: #00210c;
+  --color-error: #ffb4ab;
+  --color-on-surface: #F0F4FF;
+  --color-on-error: #690005;
+  --color-inverse-surface: #f0fdf4;
+  --color-secondary-fixed-dim: #404758;
+  --color-tertiary-fixed-dim: #5a00c6;
+  --color-surface-container-lowest: #08080A;
+  --color-surface-tint: #59df87;
+  --color-primary-container: #005227;
+  --color-primary: #59df87;
+  --color-error-container: #93000a;
+  --color-tertiary: #d2bbff;
+  --color-on-secondary-fixed-variant: #cbd5e1;
+  --color-on-primary-fixed: #77fca0;
+  --color-on-error-container: #ffdad6;
+  --color-primary-fixed: #00210c;
+  --color-secondary-fixed: #1e293b;
+  --color-on-surface-variant: #cbd5e1;
+  --color-secondary: #94a3b8;
+  --color-surface-variant: #334155;
   --color-on-primary-fixed-variant: #005227;
-  --color-background: #f9f9ff;
-  --color-on-secondary-container: #5c6274;
-  --color-surface-container-low: #f0f3ff;
-  --color-surface-container-high: #e2e8f8;
-  --color-primary-fixed-dim: #59df87;
-  --color-on-tertiary-fixed: #25005a;
-  --color-outline: #6d7b6d;
-  --color-on-tertiary-fixed-variant: #5a00c6;
-  --color-surface-container-highest: #dce2f3;
-  --color-surface-bright: #f9f9ff;
-  --color-surface: #f9f9ff;
-  --color-secondary-container: #d9dff5;
-  --color-tertiary-container: #aa80ff;
-  --color-inverse-on-surface: #ebf1ff;
+  --color-background: #08080A;
+  --color-on-secondary-container: #e2e8f0;
+  --color-surface-container-low: #0c0c0e;
+  --color-surface-container-high: #141416;
+  --color-primary-fixed-dim: #006d36;
+  --color-on-tertiary-fixed: #eaddff;
+  --color-outline: rgba(255, 255, 255, 0.15);
+  --color-on-tertiary-fixed-variant: #aa80ff;
+  --color-surface-container-highest: #1a1a1f;
+  --color-surface-bright: #1c1c21;
+  --color-surface: #08080A;
+  --color-secondary-container: #1e293b;
+  --color-tertiary-container: #3730a3;
+  --color-inverse-on-surface: #08080A;
 
   background-color: var(--color-background);
+  background-image: 
+    radial-gradient(at 0% 0%, rgba(89, 223, 135, 0.05) 0, transparent 50%), 
+    radial-gradient(at 100% 100%, rgba(89, 223, 135, 0.05) 0, transparent 50%),
+    radial-gradient(at 50% 0%, rgba(210, 187, 255, 0.03) 0, transparent 40%);
   color: var(--color-on-surface);
 }
+
 
 .obsidian-glass .glass-card {
   background: rgba(255, 255, 255, 0.7);
@@ -121,6 +127,18 @@ h1, h2, h3, h4, h5, h6 {
 
 @keyframes scan {
   0% { transform: translateY(-40px); }
-  100% { transform: translateY(200px); }
+  100% { transform: translateY(300px); }
 }
 
+.score-progress-ring {
+  transition: stroke-dashoffset 1s ease-out;
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-10px); }
+}
+
+.animate-float {
+  animation: float 3s ease-in-out infinite;
+}
